@@ -38,6 +38,28 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 - `undo_last_change(sessionId)` rolls back to the latest checkpoint.
 - Safety guard: opening files larger than 20 MB is blocked.
 
+## Phase 4 (Word) tools
+
+- `word_insert_paragraph_at(sessionId, index, text)` inserts a paragraph at a 1-based index.
+- `word_replace_text(sessionId, find, replace, matchCase)` replaces text and returns replacement count.
+- `word_add_heading(sessionId, level, text)` appends heading style paragraphs (levels 1-6).
+- `word_add_bulleted_list(sessionId, lines)` appends newline-separated bullet items.
+
+## Phase 4 (Excel) tools
+
+- `excel_get_used_range(sessionId, sheetName)` returns used range bounds and dimensions.
+- `excel_set_range_values(sessionId, sheetName, startCell, valuesJson)` sets a 2D value matrix from JSON.
+- `excel_set_formula(sessionId, sheetName, cellReference, formula)` writes a formula.
+- `excel_get_formula(sessionId, sheetName, cellReference)` reads a formula.
+
+## Phase 4 (PowerPoint) tools
+
+- `powerpoint_insert_slide_at(sessionId, index, title, body)` inserts at 1-based index.
+- `powerpoint_set_slide_title(sessionId, slideIndex, title)` updates slide title text.
+- `powerpoint_set_slide_body(sessionId, slideIndex, body)` updates slide body text.
+- `powerpoint_reorder_slide(sessionId, fromIndex, toIndex)` reorders slides.
+- `powerpoint_delete_slide(sessionId, slideIndex)` deletes a slide by 1-based index.
+
 ## Run locally
 
 ```bash

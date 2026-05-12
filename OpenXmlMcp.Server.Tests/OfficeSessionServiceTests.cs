@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DocumentFormat.OpenXml.Packaging;
 using OpenXmlMcp.Server.Services;
 
 namespace OpenXmlMcp.Server.Tests;
@@ -337,6 +338,282 @@ public class OfficeSessionServiceTests
 
             var ex = Assert.Throws<InvalidOperationException>(() => service.OpenDocument(filePath));
             Assert.Contains("exceeds safety limit", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordInsertParagraphAt_UsesOneBasedIndex()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "first");
+            service.WordAppendParagraph(sessionId, "third");
+            service.WordInsertParagraphAt(sessionId, 2, "second");
+
+            var matches = service.FindText(sessionId, "second");
+            Assert.Contains("\"index\":2", matches, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordReplaceText_ReturnsReplacementCount()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "alpha beta alpha");
+
+            var count = service.WordReplaceText(sessionId, "alpha", "gamma", matchCase: false);
+
+            Assert.Equal(2, count);
+            var result = service.FindText(sessionId, "gamma");
+            Assert.Contains("\"matchCount\":1", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAddHeading_AndBulletedList_AreSearchable()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddHeading(sessionId, 2, "Roadmap");
+            service.WordAddBulletedList(sessionId, "Item A\nItem B");
+
+            var headingResult = service.FindText(sessionId, "Roadmap");
+            var bulletResult = service.FindText(sessionId, "Item B");
+            Assert.Contains("\"matchCount\":1", headingResult, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"matchCount\":1", bulletResult, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSetRangeValues_AndGetUsedRange_Works()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelSetRangeValues(sessionId, "Sheet1", "B2", "[[\"A\",\"B\"],[\"C\",\"D\"]]");
+
+            var usedRange = service.ExcelGetUsedRange(sessionId, "Sheet1");
+            Assert.Contains("\"startCell\":\"B2\"", usedRange, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"endCell\":\"C3\"", usedRange, StringComparison.OrdinalIgnoreCase);
+
+            var value = service.ExcelGetCellValue(sessionId, "Sheet1", "C3");
+            Assert.Equal("D", value);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSetFormula_AndGetFormula_Works()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelSetFormula(sessionId, "Sheet1", "C1", "=A1+B1");
+
+            var formula = service.ExcelGetFormula(sessionId, "Sheet1", "C1");
+            Assert.Equal("A1+B1", formula);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointInsertSlideAt_UsesOneBasedIndex()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "One", "First");
+            service.PowerPointAddSlide(sessionId, "Three", "Third");
+            service.PowerPointInsertSlideAt(sessionId, 2, "Two", "Second");
+
+            var search = service.FindText(sessionId, "Two");
+            Assert.Contains("\"slideIndex\":2", search, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointSetSlideTitleAndBody_UpdatesSlideContent()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Old Title", "Old Body");
+            service.PowerPointSetSlideTitle(sessionId, 1, "New Title");
+            service.PowerPointSetSlideBody(sessionId, 1, "New Body");
+
+            var titleSearch = service.FindText(sessionId, "New Title");
+            var bodySearch = service.FindText(sessionId, "New Body");
+            Assert.Contains("\"matchCount\":1", titleSearch, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"matchCount\":1", bodySearch, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointReorderAndDeleteSlide_Work()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "One", "A");
+            service.PowerPointAddSlide(sessionId, "Two", "B");
+            service.PowerPointAddSlide(sessionId, "Three", "C");
+
+            service.PowerPointReorderSlide(sessionId, 3, 1);
+            var movedSearch = service.FindText(sessionId, "Three");
+            Assert.Contains("\"slideIndex\":1", movedSearch, StringComparison.OrdinalIgnoreCase);
+
+            service.PowerPointDeleteSlide(sessionId, 2);
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"slideCount\":2", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointCreateDocument_HasSlideMasterAndTheme()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var presentationPart = presentation.PresentationPart;
+
+            Assert.NotNull(presentationPart);
+            Assert.NotEmpty(presentationPart!.SlideMasterParts);
+            Assert.NotNull(presentationPart.SlideMasterParts.First().ThemePart);
+            Assert.NotEmpty(presentationPart.SlideMasterParts.First().SlideLayoutParts);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ValidateOperation_AcceptsPowerPointUnderscoreAliases()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+
+            var validateReorder = service.ValidateOperation(sessionId, "power_point_reorder_slide");
+            var validateDelete = service.ValidateOperation(sessionId, "power_point_delete_slide");
+
+            Assert.Contains("\"isValid\":true", validateReorder, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"isValid\":true", validateDelete, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void BatchExecute_AcceptsPowerPointUnderscoreAliases()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "First", "Body");
+
+            var batchPayload = service.BatchExecute(sessionId,
+                "[{\"operation\":\"power_point_set_slide_title\",\"slideIndex\":1,\"title\":\"Updated\"}]");
+
+            Assert.Contains("\"executed\":1", batchPayload, StringComparison.OrdinalIgnoreCase);
+            var findResult = service.FindText(sessionId, "Updated");
+            Assert.Contains("\"matchCount\":1", findResult, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
         }
         finally
         {

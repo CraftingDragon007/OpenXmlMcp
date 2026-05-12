@@ -84,6 +84,46 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Inserts a paragraph at a 1-based index in a DOCX session.")]
+    public void WordInsertParagraphAt(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based paragraph insertion index.")] int index,
+        [Description("Paragraph text.")] string text)
+    {
+        officeSessionService.WordInsertParagraphAt(sessionId, index, text);
+    }
+
+    [McpServerTool]
+    [Description("Replaces text in a DOCX session and returns replacement count.")]
+    public int WordReplaceText(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Text to find.")] string find,
+        [Description("Replacement text.")] string replace,
+        [Description("Use case-sensitive matching.")] bool matchCase = false)
+    {
+        return officeSessionService.WordReplaceText(sessionId, find, replace, matchCase);
+    }
+
+    [McpServerTool]
+    [Description("Adds a heading paragraph to a DOCX session.")]
+    public void WordAddHeading(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Heading level from 1 to 6.")] int level,
+        [Description("Heading text.")] string text)
+    {
+        officeSessionService.WordAddHeading(sessionId, level, text);
+    }
+
+    [McpServerTool]
+    [Description("Adds a bulleted list to a DOCX session using newline-separated items.")]
+    public void WordAddBulletedList(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Newline-separated bullet lines.")] string lines)
+    {
+        officeSessionService.WordAddBulletedList(sessionId, lines);
+    }
+
+    [McpServerTool]
     [Description("Adds a plain table to a DOCX session.")]
     public void WordAddTable(
         [Description("Active DOCX session id.")] string sessionId,
@@ -115,6 +155,47 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Returns the used range bounds for an XLSX worksheet.")]
+    public string ExcelGetUsedRange(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName)
+    {
+        return officeSessionService.ExcelGetUsedRange(sessionId, sheetName);
+    }
+
+    [McpServerTool]
+    [Description("Sets a 2D range of values in an XLSX sheet. valuesJson must be a JSON array of arrays.")]
+    public void ExcelSetRangeValues(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName,
+        [Description("Top-left start cell, e.g. A1.")] string startCell,
+        [Description("JSON array of arrays for values.")] string valuesJson)
+    {
+        officeSessionService.ExcelSetRangeValues(sessionId, sheetName, startCell, valuesJson);
+    }
+
+    [McpServerTool]
+    [Description("Sets a formula in an XLSX cell.")]
+    public void ExcelSetFormula(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName,
+        [Description("Cell reference, e.g. C1.")] string cellReference,
+        [Description("Formula with or without leading '='.")] string formula)
+    {
+        officeSessionService.ExcelSetFormula(sessionId, sheetName, cellReference, formula);
+    }
+
+    [McpServerTool]
+    [Description("Gets a formula from an XLSX cell.")]
+    public string ExcelGetFormula(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName,
+        [Description("Cell reference, e.g. C1.")] string cellReference)
+    {
+        return officeSessionService.ExcelGetFormula(sessionId, sheetName, cellReference);
+    }
+
+    [McpServerTool]
     [Description("Adds a new worksheet to an XLSX session.")]
     public void ExcelAddWorksheet(
         [Description("Active XLSX session id.")] string sessionId,
@@ -131,6 +212,56 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Slide body text.")] string body)
     {
         officeSessionService.PowerPointAddSlide(sessionId, title, body);
+    }
+
+    [McpServerTool]
+    [Description("Inserts a slide at a 1-based index in a PPTX session.")]
+    public void PowerPointInsertSlideAt(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based insertion index.")] int index,
+        [Description("Slide title.")] string title,
+        [Description("Slide body text.")] string body)
+    {
+        officeSessionService.PowerPointInsertSlideAt(sessionId, index, title, body);
+    }
+
+    [McpServerTool]
+    [Description("Sets the title text for a slide by 1-based index.")]
+    public void PowerPointSetSlideTitle(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex,
+        [Description("New title text.")] string title)
+    {
+        officeSessionService.PowerPointSetSlideTitle(sessionId, slideIndex, title);
+    }
+
+    [McpServerTool]
+    [Description("Sets the body text for a slide by 1-based index.")]
+    public void PowerPointSetSlideBody(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex,
+        [Description("New body text.")] string body)
+    {
+        officeSessionService.PowerPointSetSlideBody(sessionId, slideIndex, body);
+    }
+
+    [McpServerTool]
+    [Description("Moves a slide from one 1-based index to another.")]
+    public void PowerPointReorderSlide(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based source slide index.")] int fromIndex,
+        [Description("1-based destination slide index.")] int toIndex)
+    {
+        officeSessionService.PowerPointReorderSlide(sessionId, fromIndex, toIndex);
+    }
+
+    [McpServerTool]
+    [Description("Deletes a slide by 1-based index.")]
+    public void PowerPointDeleteSlide(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex)
+    {
+        officeSessionService.PowerPointDeleteSlide(sessionId, slideIndex);
     }
 
     [McpServerTool]
