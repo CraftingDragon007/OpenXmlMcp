@@ -32,6 +32,12 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 - `powerpoint_add_bullet_slide(sessionId, title, bulletLines)` adds a bullet-style slide.
 - `batch_execute(sessionId, operationsJson)` executes a JSON array of operations and returns per-operation results.
 
+## Phase 3 tools
+
+- `get_operation_history(sessionId)` returns an operation audit trail.
+- `undo_last_change(sessionId)` rolls back to the latest checkpoint.
+- Safety guard: opening files larger than 20 MB is blocked.
+
 ## Run locally
 
 ```bash

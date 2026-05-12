@@ -16,6 +16,9 @@ namespace OpenXmlMcp.Server.Services;
 public class OfficeSessionService
 {
     private readonly ConcurrentDictionary<string, OfficeSession> _sessions = new();
+    private readonly ConcurrentDictionary<string, Stack<string>> _sessionSnapshots = new();
+    private readonly ConcurrentDictionary<string, List<OperationLogEntry>> _sessionOperationLog = new();
+    private const long MaxOpenFileSizeBytes = 20 * 1024 * 1024;
 
     public string OpenDocument(string filePath, bool readOnly = false)
     {
@@ -24,6 +27,12 @@ public class OfficeSessionService
         if (!File.Exists(normalizedPath))
         {
             throw new FileNotFoundException("Office file not found.", normalizedPath);
+        }
+
+        var fileInfo = new FileInfo(normalizedPath);
+        if (fileInfo.Length > MaxOpenFileSizeBytes)
+        {
+            throw new InvalidOperationException($"File size {fileInfo.Length} exceeds safety limit {MaxOpenFileSizeBytes} bytes.");
         }
 
         var session = new OfficeSession
@@ -36,6 +45,9 @@ public class OfficeSessionService
         };
 
         _sessions[session.Id] = session;
+        _sessionSnapshots.TryAdd(session.Id, new Stack<string>());
+        _sessionOperationLog.TryAdd(session.Id, new List<OperationLogEntry>());
+        AppendOperationLog(session.Id, "open_document", $"Opened '{normalizedPath}' (readOnly={readOnly}).");
         return session.Id;
     }
 
@@ -57,10 +69,49 @@ public class OfficeSessionService
 
     public void CloseDocument(string sessionId)
     {
+        if (_sessionSnapshots.TryRemove(sessionId, out var snapshots))
+        {
+            foreach (var snapshotFile in snapshots)
+            {
+                DeleteIfExists(snapshotFile);
+            }
+        }
+
+        _sessionOperationLog.TryRemove(sessionId, out _);
+
         if (!_sessions.TryRemove(sessionId, out _))
         {
             throw new InvalidOperationException($"Session '{sessionId}' was not found.");
         }
+    }
+
+    public string GetOperationHistory(string sessionId)
+    {
+        _ = GetSession(sessionId);
+        var history = _sessionOperationLog.TryGetValue(sessionId, out var entries)
+            ? entries.Select(x => new { x.TimestampUtc, x.OperationName, x.Message }).ToArray()
+            : [];
+
+        return JsonSerializer.Serialize(new { sessionId, count = history.Length, history });
+    }
+
+    public void UndoLastChange(string sessionId)
+    {
+        var session = GetSession(sessionId);
+        if (session.IsReadOnly)
+        {
+            throw new InvalidOperationException("Session is read-only.");
+        }
+
+        if (!_sessionSnapshots.TryGetValue(sessionId, out var snapshots) || snapshots.Count == 0)
+        {
+            throw new InvalidOperationException("No checkpoint is available to undo.");
+        }
+
+        var snapshotPath = snapshots.Pop();
+        File.Copy(snapshotPath, session.FilePath, overwrite: true);
+        DeleteIfExists(snapshotPath);
+        AppendOperationLog(sessionId, "undo_last_change", "Restored document from latest checkpoint.");
     }
 
     public string GetDocumentInfo(string sessionId)
@@ -128,7 +179,8 @@ public class OfficeSessionService
             "power_point_add_slide" or
             "powerpoint_add_bullet_slide" or
             "power_point_add_bullet_slide" or
-            "batch_execute";
+            "batch_execute" or
+            "undo_last_change";
         var expectedType = normalized switch
         {
             "word_append_paragraph" => OfficeDocumentType.Word,
@@ -143,7 +195,7 @@ public class OfficeSessionService
         var warnings = new List<string>();
         var isValid = true;
 
-        if (expectedType is null && normalized is not "find_text" and not "list_structure" and not "get_document_info" and not "save_document" and not "close_document" and not "batch_execute")
+        if (expectedType is null && normalized is not "find_text" and not "list_structure" and not "get_document_info" and not "save_document" and not "close_document" and not "batch_execute" and not "get_operation_history" and not "undo_last_change")
         {
             isValid = false;
             warnings.Add($"Unknown operation '{operationName}'.");
@@ -180,23 +232,26 @@ public class OfficeSessionService
         }
 
         var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
-        using var document = WordprocessingDocument.Open(session.FilePath, true);
-        var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
-
-        var table = new W.Table();
-        for (var r = 0; r < rows; r++)
+        ExecuteWriteOperation(session, "word_add_table", () =>
         {
-            var tableRow = new W.TableRow();
-            for (var c = 0; c < columns; c++)
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+
+            var table = new W.Table();
+            for (var r = 0; r < rows; r++)
             {
-                tableRow.Append(new W.TableCell(new W.Paragraph(new W.Run(new W.Text(string.Empty)))));
+                var tableRow = new W.TableRow();
+                for (var c = 0; c < columns; c++)
+                {
+                    tableRow.Append(new W.TableCell(new W.Paragraph(new W.Run(new W.Text(string.Empty)))));
+                }
+
+                table.Append(tableRow);
             }
 
-            table.Append(tableRow);
-        }
-
-        body.Append(table);
-        document.MainDocumentPart.Document?.Save();
+            body.Append(table);
+            document.MainDocumentPart.Document?.Save();
+        });
     }
 
     public void ExcelAddWorksheet(string sessionId, string sheetName)
@@ -204,29 +259,32 @@ public class OfficeSessionService
         ArgumentException.ThrowIfNullOrWhiteSpace(sheetName);
         var session = GetWritableSession(sessionId, OfficeDocumentType.Excel);
 
-        using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, true);
-        var workbookPart = GetWorkbookPart(spreadsheet);
-        var workbook = GetWorkbook(workbookPart);
-        var sheets = workbook.Sheets ?? workbook.AppendChild(new Sheets());
-
-        if (GetSheets(workbookPart).Any(s => string.Equals(s.Name?.Value, sheetName, StringComparison.OrdinalIgnoreCase)))
+        ExecuteWriteOperation(session, "excel_add_worksheet", () =>
         {
-            throw new InvalidOperationException($"Sheet '{sheetName}' already exists.");
-        }
+            using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, true);
+            var workbookPart = GetWorkbookPart(spreadsheet);
+            var workbook = GetWorkbook(workbookPart);
+            var sheets = workbook.Sheets ?? workbook.AppendChild(new Sheets());
 
-        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
-        worksheetPart.Worksheet = new Worksheet(new SheetData());
-        worksheetPart.Worksheet.Save();
+            if (GetSheets(workbookPart).Any(s => string.Equals(s.Name?.Value, sheetName, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Sheet '{sheetName}' already exists.");
+            }
 
-        var nextSheetId = sheets.Elements<Sheet>().Select(s => s.SheetId?.Value ?? 0U).DefaultIfEmpty(0U).Max() + 1;
-        sheets.Append(new Sheet
-        {
-            Id = workbookPart.GetIdOfPart(worksheetPart),
-            SheetId = nextSheetId,
-            Name = sheetName
+            var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+            worksheetPart.Worksheet = new Worksheet(new SheetData());
+            worksheetPart.Worksheet.Save();
+
+            var nextSheetId = sheets.Elements<Sheet>().Select(s => s.SheetId?.Value ?? 0U).DefaultIfEmpty(0U).Max() + 1;
+            sheets.Append(new Sheet
+            {
+                Id = workbookPart.GetIdOfPart(worksheetPart),
+                SheetId = nextSheetId,
+                Name = sheetName
+            });
+
+            workbook.Save();
         });
-
-        workbook.Save();
     }
 
     public void PowerPointAddBulletSlide(string sessionId, string title, string bulletLines)
@@ -234,7 +292,8 @@ public class OfficeSessionService
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(bulletLines);
         var body = string.Join(Environment.NewLine, bulletLines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(line => $"- {line}"));
-        PowerPointAddSlide(sessionId, title, body);
+        var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
+        ExecuteWriteOperation(session, "powerpoint_add_bullet_slide", () => PowerPointAddSlideCore(session.FilePath, title, body));
     }
 
     public string BatchExecute(string sessionId, string operationsJson)
@@ -279,16 +338,18 @@ public class OfficeSessionService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
-
-        using var document = WordprocessingDocument.Open(session.FilePath, true);
-        var body = document.MainDocumentPart?.Document?.Body;
-        if (body is null)
+        ExecuteWriteOperation(session, "word_append_paragraph", () =>
         {
-            throw new InvalidOperationException("Word document body is missing.");
-        }
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body;
+            if (body is null)
+            {
+                throw new InvalidOperationException("Word document body is missing.");
+            }
 
-        body.AppendChild(new W.Paragraph(new W.Run(new W.Text(text))));
-        document.MainDocumentPart!.Document!.Save();
+            body.AppendChild(new W.Paragraph(new W.Run(new W.Text(text))));
+            document.MainDocumentPart!.Document!.Save();
+        });
     }
 
     public void ExcelSetCellValue(string sessionId, string sheetName, string cellReference, string value)
@@ -296,34 +357,36 @@ public class OfficeSessionService
         ArgumentException.ThrowIfNullOrWhiteSpace(sheetName);
         ArgumentException.ThrowIfNullOrWhiteSpace(cellReference);
         var session = GetWritableSession(sessionId, OfficeDocumentType.Excel);
-
-        using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, true);
-        var workbookPart = GetWorkbookPart(spreadsheet);
-        var sheet = GetSheetByName(workbookPart, sheetName);
-        var worksheetPart = GetWorksheetPart(workbookPart, sheet);
-        var worksheet = GetWorksheet(worksheetPart);
-        var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
-
-        var rowIndex = ParseRowIndex(cellReference);
-        var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIndex);
-        if (row is null)
+        ExecuteWriteOperation(session, "excel_set_cell_value", () =>
         {
-            row = new Row { RowIndex = rowIndex };
-            sheetData.Append(row);
-        }
+            using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, true);
+            var workbookPart = GetWorkbookPart(spreadsheet);
+            var sheet = GetSheetByName(workbookPart, sheetName);
+            var worksheetPart = GetWorksheetPart(workbookPart, sheet);
+            var worksheet = GetWorksheet(worksheetPart);
+            var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
 
-        var cell = row.Elements<Cell>().FirstOrDefault(c => string.Equals(c.CellReference?.Value, cellReference, StringComparison.OrdinalIgnoreCase));
-        if (cell is null)
-        {
-            cell = new Cell { CellReference = cellReference.ToUpperInvariant() };
-            row.Append(cell);
-        }
+            var rowIndex = ParseRowIndex(cellReference);
+            var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIndex);
+            if (row is null)
+            {
+                row = new Row { RowIndex = rowIndex };
+                sheetData.Append(row);
+            }
 
-        cell.DataType = CellValues.String;
-        cell.CellValue = new CellValue(value);
+            var cell = row.Elements<Cell>().FirstOrDefault(c => string.Equals(c.CellReference?.Value, cellReference, StringComparison.OrdinalIgnoreCase));
+            if (cell is null)
+            {
+                cell = new Cell { CellReference = cellReference.ToUpperInvariant() };
+                row.Append(cell);
+            }
 
-        worksheet.Save();
-        GetWorkbook(workbookPart).Save();
+            cell.DataType = CellValues.String;
+            cell.CellValue = new CellValue(value);
+
+            worksheet.Save();
+            GetWorkbook(workbookPart).Save();
+        });
     }
 
     public string ExcelGetCellValue(string sessionId, string sheetName, string cellReference)
@@ -353,7 +416,12 @@ public class OfficeSessionService
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
         var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
 
-        using var presentation = PresentationDocument.Open(session.FilePath, true);
+        ExecuteWriteOperation(session, "powerpoint_add_slide", () => PowerPointAddSlideCore(session.FilePath, title, body));
+    }
+
+    private static void PowerPointAddSlideCore(string filePath, string title, string body)
+    {
+        using var presentation = PresentationDocument.Open(filePath, true);
         var presentationPart = presentation.PresentationPart ?? throw new InvalidOperationException("Presentation part is missing.");
         var presentationDocument = presentationPart.Presentation ?? throw new InvalidOperationException("Presentation document is missing.");
         var slideIdList = presentationDocument.SlideIdList ?? presentationDocument.AppendChild(new SlideIdList());
@@ -702,6 +770,52 @@ public class OfficeSessionService
         return Path.GetFullPath(filePath);
     }
 
+    private void ExecuteWriteOperation(OfficeSession session, string operationName, Action operation)
+    {
+        var snapshotPath = CreateSnapshot(session);
+
+        try
+        {
+            operation();
+            AppendOperationLog(session.Id, operationName, "Operation completed.");
+        }
+        catch
+        {
+            if (_sessionSnapshots.TryGetValue(session.Id, out var snapshots) && snapshots.Count > 0 && snapshots.Peek() == snapshotPath)
+            {
+                snapshots.Pop();
+            }
+
+            DeleteIfExists(snapshotPath);
+            throw;
+        }
+    }
+
+    private string CreateSnapshot(OfficeSession session)
+    {
+        var snapshotPath = Path.Combine(Path.GetTempPath(), $"openxmlmcp-snapshot-{session.Id}-{Guid.NewGuid():N}{Path.GetExtension(session.FilePath)}");
+        File.Copy(session.FilePath, snapshotPath, overwrite: true);
+
+        var snapshots = _sessionSnapshots.GetOrAdd(session.Id, _ => new Stack<string>());
+        snapshots.Push(snapshotPath);
+        AppendOperationLog(session.Id, "checkpoint", $"Snapshot created: {snapshotPath}");
+        return snapshotPath;
+    }
+
+    private void AppendOperationLog(string sessionId, string operationName, string message)
+    {
+        var history = _sessionOperationLog.GetOrAdd(sessionId, _ => new List<OperationLogEntry>());
+        history.Add(new OperationLogEntry(DateTimeOffset.UtcNow, operationName, message));
+    }
+
+    private static void DeleteIfExists(string filePath)
+    {
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+    }
+
     private static uint ParseRowIndex(string cellReference)
     {
         var rowText = new string(cellReference.Where(char.IsDigit).ToArray());
@@ -712,4 +826,6 @@ public class OfficeSessionService
 
         throw new InvalidOperationException($"Invalid cell reference '{cellReference}'.");
     }
+
+    private sealed record OperationLogEntry(DateTimeOffset TimestampUtc, string OperationName, string Message);
 }

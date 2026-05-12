@@ -151,4 +151,20 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     {
         return officeSessionService.BatchExecute(sessionId, operationsJson);
     }
+
+    [McpServerTool]
+    [Description("Returns operation history entries for a session.")]
+    public string GetOperationHistory(
+        [Description("Active session id.")] string sessionId)
+    {
+        return officeSessionService.GetOperationHistory(sessionId);
+    }
+
+    [McpServerTool]
+    [Description("Restores the previous checkpoint for the active session.")]
+    public void UndoLastChange(
+        [Description("Active session id.")] string sessionId)
+    {
+        officeSessionService.UndoLastChange(sessionId);
+    }
 }

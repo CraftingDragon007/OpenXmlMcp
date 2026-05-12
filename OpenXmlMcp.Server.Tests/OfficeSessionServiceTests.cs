@@ -278,4 +278,69 @@ public class OfficeSessionServiceTests
             DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void UndoLastChange_RestoresPreviousState()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Before undo");
+            service.UndoLastChange(sessionId);
+
+            var result = service.FindText(sessionId, "Before undo");
+            Assert.Contains("\"matchCount\":0", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void GetOperationHistory_ReturnsEntries()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "History entry");
+
+            var history = service.GetOperationHistory(sessionId);
+            Assert.Contains("word_append_paragraph", history, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void OpenDocument_LargeFile_ThrowsSafetyException()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+            stream.SetLength(21L * 1024 * 1024);
+
+            var ex = Assert.Throws<InvalidOperationException>(() => service.OpenDocument(filePath));
+            Assert.Contains("exceeds safety limit", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
 }
