@@ -84,6 +84,16 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Adds a plain table to a DOCX session.")]
+    public void WordAddTable(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Number of rows.")] int rows,
+        [Description("Number of columns.")] int columns)
+    {
+        officeSessionService.WordAddTable(sessionId, rows, columns);
+    }
+
+    [McpServerTool]
     [Description("Sets a string value in an XLSX cell.")]
     public void ExcelSetCellValue(
         [Description("Active XLSX session id.")] string sessionId,
@@ -105,6 +115,15 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Adds a new worksheet to an XLSX session.")]
+    public void ExcelAddWorksheet(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("New sheet name.")] string sheetName)
+    {
+        officeSessionService.ExcelAddWorksheet(sessionId, sheetName);
+    }
+
+    [McpServerTool]
     [Description("Adds a simple title/body slide to a PPTX session.")]
     public void PowerPointAddSlide(
         [Description("Active PPTX session id.")] string sessionId,
@@ -112,5 +131,24 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Slide body text.")] string body)
     {
         officeSessionService.PowerPointAddSlide(sessionId, title, body);
+    }
+
+    [McpServerTool]
+    [Description("Adds a bullet style slide to a PPTX session. Provide newline-separated bullet text.")]
+    public void PowerPointAddBulletSlide(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("Slide title.")] string title,
+        [Description("Newline-separated bullet lines.")] string bulletLines)
+    {
+        officeSessionService.PowerPointAddBulletSlide(sessionId, title, bulletLines);
+    }
+
+    [McpServerTool]
+    [Description("Executes multiple operations for one active session. Input is a JSON array of operation objects.")]
+    public string BatchExecute(
+        [Description("Active session id.")] string sessionId,
+        [Description("JSON array of operations with operation-specific fields.")] string operationsJson)
+    {
+        return officeSessionService.BatchExecute(sessionId, operationsJson);
     }
 }

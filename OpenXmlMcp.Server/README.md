@@ -25,6 +25,13 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 - `excel_get_cell_value(sessionId, sheetName, cellReference)` reads a string cell value.
 - `powerpoint_add_slide(sessionId, title, body)` adds a simple title/body slide.
 
+## Phase 2 tools
+
+- `word_add_table(sessionId, rows, columns)` inserts a basic table in Word.
+- `excel_add_worksheet(sessionId, sheetName)` adds a worksheet to Excel.
+- `powerpoint_add_bullet_slide(sessionId, title, bulletLines)` adds a bullet-style slide.
+- `batch_execute(sessionId, operationsJson)` executes a JSON array of operations and returns per-operation results.
+
 ## Run locally
 
 ```bash

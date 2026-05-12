@@ -140,4 +140,142 @@ public class OfficeSessionServiceTests
             File.Delete(filePath);
         }
     }
+
+    [Fact]
+    public void WordSession_AddTable_IncreasesTableCount()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 3);
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"tableCount\":1", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSession_AddWorksheet_UpdatesStructure()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelAddWorksheet(sessionId, "Data");
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"sheetCount\":2", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Data", structure);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSession_AddWorksheetThenSetValue_Works()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelAddWorksheet(sessionId, "Data");
+            service.ExcelSetCellValue(sessionId, "Data", "C3", "PHASE2-OK");
+
+            var value = service.ExcelGetCellValue(sessionId, "Data", "C3");
+            Assert.Equal("PHASE2-OK", value);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointSession_AddBulletSlide_IsSearchable()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddBulletSlide(sessionId, "Sprint", "Task A\nTask B");
+
+            var result = service.FindText(sessionId, "Task B");
+            Assert.Contains("\"matchCount\":1", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void BatchExecute_MixedOperations_ReportsFailuresAndSuccesses()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var operations = "[" +
+                "{\"operation\":\"word_append_paragraph\",\"text\":\"hello\"}," +
+                "{\"operation\":\"word_add_table\",\"rows\":1,\"columns\":1}," +
+                "{\"operation\":\"excel_set_cell_value\",\"sheetName\":\"Sheet1\",\"cellReference\":\"A1\",\"value\":\"x\"}" +
+                "]";
+
+            var payload = service.BatchExecute(sessionId, operations);
+            Assert.Contains("\"executed\":2", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"failed\":1", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ValidateOperation_KnowsPhase2OperationNames()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var payload = service.ValidateOperation(sessionId, "word_add_table");
+
+            Assert.Contains("\"isValid\":true", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
 }

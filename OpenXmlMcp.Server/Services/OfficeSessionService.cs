@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
@@ -118,17 +119,35 @@ public class OfficeSessionService
         var session = GetSession(sessionId);
 
         var normalized = operationName.Trim().ToLowerInvariant();
-        var requiresWrite = normalized is "word_append_paragraph" or "excel_set_cell_value" or "powerpoint_add_slide";
+        var requiresWrite = normalized is
+            "word_append_paragraph" or
+            "word_add_table" or
+            "excel_set_cell_value" or
+            "excel_add_worksheet" or
+            "powerpoint_add_slide" or
+            "power_point_add_slide" or
+            "powerpoint_add_bullet_slide" or
+            "power_point_add_bullet_slide" or
+            "batch_execute";
         var expectedType = normalized switch
         {
             "word_append_paragraph" => OfficeDocumentType.Word,
+            "word_add_table" => OfficeDocumentType.Word,
             "excel_set_cell_value" or "excel_get_cell_value" => OfficeDocumentType.Excel,
-            "powerpoint_add_slide" => OfficeDocumentType.PowerPoint,
+            "excel_add_worksheet" => OfficeDocumentType.Excel,
+            "powerpoint_add_slide" or "power_point_add_slide" => OfficeDocumentType.PowerPoint,
+            "powerpoint_add_bullet_slide" or "power_point_add_bullet_slide" => OfficeDocumentType.PowerPoint,
             _ => (OfficeDocumentType?)null
         };
 
         var warnings = new List<string>();
         var isValid = true;
+
+        if (expectedType is null && normalized is not "find_text" and not "list_structure" and not "get_document_info" and not "save_document" and not "close_document" and not "batch_execute")
+        {
+            isValid = false;
+            warnings.Add($"Unknown operation '{operationName}'.");
+        }
 
         if (requiresWrite && session.IsReadOnly)
         {
@@ -151,6 +170,109 @@ public class OfficeSessionService
         };
 
         return JsonSerializer.Serialize(payload);
+    }
+
+    public void WordAddTable(string sessionId, int rows, int columns)
+    {
+        if (rows <= 0 || columns <= 0)
+        {
+            throw new InvalidOperationException("Rows and columns must be greater than zero.");
+        }
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        using var document = WordprocessingDocument.Open(session.FilePath, true);
+        var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+
+        var table = new W.Table();
+        for (var r = 0; r < rows; r++)
+        {
+            var tableRow = new W.TableRow();
+            for (var c = 0; c < columns; c++)
+            {
+                tableRow.Append(new W.TableCell(new W.Paragraph(new W.Run(new W.Text(string.Empty)))));
+            }
+
+            table.Append(tableRow);
+        }
+
+        body.Append(table);
+        document.MainDocumentPart.Document?.Save();
+    }
+
+    public void ExcelAddWorksheet(string sessionId, string sheetName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sheetName);
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Excel);
+
+        using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, true);
+        var workbookPart = GetWorkbookPart(spreadsheet);
+        var workbook = GetWorkbook(workbookPart);
+        var sheets = workbook.Sheets ?? workbook.AppendChild(new Sheets());
+
+        if (GetSheets(workbookPart).Any(s => string.Equals(s.Name?.Value, sheetName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"Sheet '{sheetName}' already exists.");
+        }
+
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(new SheetData());
+        worksheetPart.Worksheet.Save();
+
+        var nextSheetId = sheets.Elements<Sheet>().Select(s => s.SheetId?.Value ?? 0U).DefaultIfEmpty(0U).Max() + 1;
+        sheets.Append(new Sheet
+        {
+            Id = workbookPart.GetIdOfPart(worksheetPart),
+            SheetId = nextSheetId,
+            Name = sheetName
+        });
+
+        workbook.Save();
+    }
+
+    public void PowerPointAddBulletSlide(string sessionId, string title, string bulletLines)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentException.ThrowIfNullOrWhiteSpace(bulletLines);
+        var body = string.Join(Environment.NewLine, bulletLines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(line => $"- {line}"));
+        PowerPointAddSlide(sessionId, title, body);
+    }
+
+    public string BatchExecute(string sessionId, string operationsJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationsJson);
+        _ = GetSession(sessionId);
+
+        var root = JsonNode.Parse(operationsJson) ?? throw new InvalidOperationException("Invalid operations JSON.");
+        var operations = root.AsArray();
+        var executed = 0;
+        var failures = new List<object>();
+
+        foreach (var op in operations)
+        {
+            if (op is null)
+            {
+                continue;
+            }
+
+            var operation = op["operation"]?.GetValue<string>() ?? string.Empty;
+            try
+            {
+                ExecuteBatchOperation(sessionId, operation, op);
+                executed++;
+            }
+            catch (Exception ex)
+            {
+                failures.Add(new { operation, error = ex.Message });
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            total = operations.Count,
+            executed,
+            failed = failures.Count,
+            failures
+        });
     }
 
     public void WordAppendParagraph(string sessionId, string text)
@@ -368,6 +490,43 @@ public class OfficeSessionService
         }
 
         return rawValue;
+    }
+
+    private void ExecuteBatchOperation(string sessionId, string operation, JsonNode payload)
+    {
+        switch (operation.Trim().ToLowerInvariant())
+        {
+            case "word_append_paragraph":
+                WordAppendParagraph(sessionId, payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."));
+                break;
+            case "word_add_table":
+                WordAddTable(sessionId, payload["rows"]?.GetValue<int>() ?? 0, payload["columns"]?.GetValue<int>() ?? 0);
+                break;
+            case "excel_set_cell_value":
+                ExcelSetCellValue(
+                    sessionId,
+                    payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."),
+                    payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."),
+                    payload["value"]?.GetValue<string>() ?? string.Empty);
+                break;
+            case "excel_add_worksheet":
+                ExcelAddWorksheet(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."));
+                break;
+            case "powerpoint_add_slide":
+                PowerPointAddSlide(
+                    sessionId,
+                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."),
+                    payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'."));
+                break;
+            case "powerpoint_add_bullet_slide":
+                PowerPointAddBulletSlide(
+                    sessionId,
+                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."),
+                    payload["bulletLines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'bulletLines'."));
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported batch operation '{operation}'.");
+        }
     }
 
     private OfficeSession GetSession(string sessionId)
