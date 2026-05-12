@@ -30,4 +30,20 @@ internal class OpenXmlTools(OpenXmlDocumentService documentService)
     {
         return documentService.CountParagraphs(base64Docx);
     }
+
+    [McpServerTool]
+    [Description("Extracts plain text from a DOCX file path on the local filesystem.")]
+    public string ExtractDocxTextFromPath(
+        [Description("Absolute or relative path to a DOCX file.")] string filePath)
+    {
+        return documentService.ExtractPlainTextFromPath(filePath);
+    }
+
+    [McpServerTool]
+    [Description("Counts paragraphs in a DOCX file path on the local filesystem.")]
+    public int CountDocxParagraphsFromPath(
+        [Description("Absolute or relative path to a DOCX file.")] string filePath)
+    {
+        return documentService.CountParagraphsFromPath(filePath);
+    }
 }

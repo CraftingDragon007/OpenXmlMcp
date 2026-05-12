@@ -53,4 +53,41 @@ public class OpenXmlDocumentService
         using var document = WordprocessingDocument.Open(stream, false);
         return document.MainDocumentPart?.Document?.Body?.Descendants<Paragraph>().Count() ?? 0;
     }
+
+    public string ExtractPlainTextFromPath(string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException("DOCX file not found.", filePath);
+        }
+
+        using var document = WordprocessingDocument.Open(filePath, false);
+        var body = document.MainDocumentPart?.Document?.Body;
+
+        if (body is null)
+        {
+            return string.Empty;
+        }
+
+        var lines = body.Descendants<Paragraph>()
+            .Select(paragraph => paragraph.InnerText)
+            .Where(text => !string.IsNullOrWhiteSpace(text));
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    public int CountParagraphsFromPath(string filePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException("DOCX file not found.", filePath);
+        }
+
+        using var document = WordprocessingDocument.Open(filePath, false);
+        return document.MainDocumentPart?.Document?.Body?.Descendants<Paragraph>().Count() ?? 0;
+    }
 }
