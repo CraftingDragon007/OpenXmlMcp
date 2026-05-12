@@ -12,8 +12,10 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 // Add the MCP services: the transport to use (stdio) and the tools to register.
 builder.Services
     .AddSingleton<OpenXmlDocumentService>()
+    .AddSingleton<OfficeSessionService>()
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools<OpenXmlTools>();
+    .WithTools<OpenXmlTools>()
+    .WithTools<OfficeTools>();
 
 await builder.Build().RunAsync();
