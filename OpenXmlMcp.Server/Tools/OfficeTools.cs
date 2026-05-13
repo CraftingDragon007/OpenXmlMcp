@@ -437,6 +437,14 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Lists available style presets for the active document type.")]
+    public string ListStylePresets(
+        [Description("Active session id.")] string sessionId)
+    {
+        return officeSessionService.ListStylePresets(sessionId);
+    }
+
+    [McpServerTool]
     [Description("Applies text presets such as title or subtitle.")]
     public void ApplyTextPreset(
         [Description("Active session id.")] string sessionId,

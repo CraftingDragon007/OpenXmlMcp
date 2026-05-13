@@ -250,6 +250,57 @@ public class OfficeSessionServiceTests
             var payload = service.BatchExecute(sessionId, operations);
             Assert.Contains("\"executed\":2", payload, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"failed\":1", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"results\"", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void BatchExecute_AcceptsWrappedPayloadAndOperationNameAlias()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var operations = "{" +
+                "\"operations\":[" +
+                "{\"operationName\":\"word_append_paragraph\",\"text\":\"hello\"}" +
+                "]}";
+
+            var payload = service.BatchExecute(sessionId, operations);
+            Assert.Contains("\"executed\":1", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"failed\":0", payload, StringComparison.OrdinalIgnoreCase);
+
+            var find = service.FindText(sessionId, "hello");
+            Assert.Contains("\"matchCount\":1", find, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void BatchExecute_InvalidPayload_ReturnsHelpfulErrorCode()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+
+            var ex = Assert.Throws<InvalidOperationException>(() => service.BatchExecute(sessionId, "{\"foo\":1}"));
+            Assert.Contains("Invalid batch payload", ex.Message, StringComparison.OrdinalIgnoreCase);
 
             service.CloseDocument(sessionId);
         }
@@ -658,7 +709,7 @@ public class OfficeSessionServiceTests
 
             Assert.Contains("\"failed\":1", payload, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"index\":0", payload, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"errorCode\":\"InvalidOperation\"", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"errorCode\":\"MissingField\"", payload, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"executed\":1", payload, StringComparison.OrdinalIgnoreCase);
 
             service.CloseDocument(sessionId);
@@ -712,6 +763,50 @@ public class OfficeSessionServiceTests
                 .Value;
 
             Assert.Equal("Neutral", themeName);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ListStylePresets_ReturnsDocumentTypeSpecificPresets()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            var payload = service.ListStylePresets(sessionId);
+
+            Assert.Contains("PowerPoint", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("neutral", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ApplyStylePreset_InvalidPreset_ThrowsHelpfulMessage()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var ex = Assert.Throws<InvalidOperationException>(() => service.ApplyStylePreset(sessionId, "neutral"));
+
+            Assert.Contains("Invalid preset", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("default", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
         }
         finally
         {

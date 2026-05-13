@@ -29,6 +29,7 @@ internal static class OfficeOperationRegistry
             new("undo_last_change", null, true),
             new("batch_execute", null, true),
             new("apply_style_preset", null, true),
+            new("list_style_presets", null, false),
             new("apply_text_preset", null, true),
             new("word_append_paragraph", OfficeDocumentType.Word, true),
             new("word_set_paragraph_style", OfficeDocumentType.Word, true),

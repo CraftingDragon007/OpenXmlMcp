@@ -137,6 +137,7 @@ internal static class OfficeBatchDispatcher
                 svc.PowerPointAddBulletSlide(sessionId, payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."), payload["bulletLines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'bulletLines'.")),
             ["apply_style_preset"] = static (svc, sessionId, payload) =>
                 svc.ApplyStylePreset(sessionId, payload["preset"]?.GetValue<string>() ?? "default"),
+            ["list_style_presets"] = static (svc, sessionId, _) => _ = svc.ListStylePresets(sessionId),
             ["apply_text_preset"] = static (svc, sessionId, payload) =>
                 svc.ApplyTextPreset(
                     sessionId,

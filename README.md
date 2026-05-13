@@ -39,6 +39,13 @@ It provides both low-level document helpers and high-level session-based editing
 - `get_operation_history(sessionId)`
 - `undo_last_change(sessionId)`
 
+`batch_execute` accepts either:
+
+- a JSON array of operation objects, or
+- a JSON object with an `operations` array.
+
+Each operation object can use `operation` (preferred) or `operationName` (legacy alias).
+
 ## Word
 
 - Content: `word_append_paragraph`, `word_insert_paragraph_at`, `word_insert_paragraph_after_text`, `word_insert_text_after_text`, `word_replace_text`, `word_add_heading`, `word_add_table`
@@ -61,6 +68,7 @@ It provides both low-level document helpers and high-level session-based editing
 ## Cross-Suite Presets
 
 - `apply_style_preset(sessionId, preset)`
+- `list_style_presets(sessionId)`
 - `apply_text_preset(sessionId, preset, targetIndex)`
 
 ## Behavior Guarantees
@@ -101,6 +109,26 @@ Run the test suite:
 
 ```bash
 dotnet test OpenXmlMcp.slnx
+```
+
+## Examples
+
+Batch execute with wrapped payload:
+
+```json
+{
+  "operations": [
+    { "operation": "word_append_paragraph", "text": "Hello" },
+    { "operationName": "word_add_heading", "level": 2, "text": "Section" }
+  ]
+}
+```
+
+Discover and apply style presets:
+
+```text
+list_style_presets(sessionId)
+apply_style_preset(sessionId, "default")
 ```
 
 ## License

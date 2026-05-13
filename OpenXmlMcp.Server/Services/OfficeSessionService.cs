@@ -446,27 +446,59 @@ public class OfficeSessionService
         _ = GetSession(sessionId);
 
         var root = JsonNode.Parse(operationsJson) ?? throw new InvalidOperationException("Invalid operations JSON.");
-        var operations = root.AsArray();
+        JsonArray operations;
+        if (root is JsonArray directArray)
+        {
+            operations = directArray;
+        }
+        else if (root is JsonObject obj && obj["operations"] is JsonArray wrappedArray)
+        {
+            operations = wrappedArray;
+        }
+        else
+        {
+            throw new InvalidOperationException("Invalid batch payload. Expected a JSON array of operation objects or an object with an 'operations' array.");
+        }
+
         var executed = 0;
         var failures = new List<object>();
+        var results = new List<object>();
 
         for (var index = 0; index < operations.Count; index++)
         {
             var op = operations[index];
             if (op is null)
             {
+                failures.Add(new { operation = string.Empty, index, errorCode = "InvalidBatchPayload", error = "Operation entry is null." });
                 continue;
             }
 
-            var operation = op["operation"]?.GetValue<string>() ?? string.Empty;
+            if (op is not JsonObject operationObject)
+            {
+                failures.Add(new { operation = string.Empty, index, errorCode = "InvalidBatchPayload", error = "Operation entry must be a JSON object." });
+                continue;
+            }
+
+            var operation = operationObject["operation"]?.GetValue<string>()
+                ?? operationObject["operationName"]?.GetValue<string>()
+                ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(operation))
+            {
+                failures.Add(new { operation = string.Empty, index, errorCode = "MissingField", error = "Operation entry must include 'operation' (or legacy alias 'operationName')." });
+                continue;
+            }
+
             try
             {
-                ExecuteBatchOperation(sessionId, operation, op);
+                ExecuteBatchOperation(sessionId, operation, operationObject);
                 executed++;
+                results.Add(new { operation, index, ok = true });
             }
             catch (Exception ex)
             {
                 failures.Add(new { operation, index, errorCode = GetErrorCode(ex), error = ex.Message });
+                results.Add(new { operation, index, ok = false, errorCode = GetErrorCode(ex), error = ex.Message });
             }
         }
 
@@ -475,7 +507,8 @@ public class OfficeSessionService
             total = operations.Count,
             executed,
             failed = failures.Count,
-            failures
+            failures,
+            results
         });
     }
 
@@ -484,6 +517,7 @@ public class OfficeSessionService
         var currentSession = GetSession(sessionId);
         var session = GetWritableSession(sessionId, currentSession.DocumentType);
         var normalizedPreset = string.IsNullOrWhiteSpace(preset) ? "default" : preset.Trim().ToLowerInvariant();
+        ValidateStylePresetForDocumentType(session.DocumentType, normalizedPreset);
 
         ExecuteWriteOperation(session, "apply_style_preset", () =>
         {
@@ -501,6 +535,40 @@ public class OfficeSessionService
                 default:
                     throw new InvalidOperationException("Unsupported document type.");
             }
+        });
+    }
+
+    private static void ValidateStylePresetForDocumentType(OfficeDocumentType documentType, string preset)
+    {
+        var allowed = documentType switch
+        {
+            OfficeDocumentType.Word => new[] { "default" },
+            OfficeDocumentType.Excel => new[] { "default" },
+            OfficeDocumentType.PowerPoint => new[] { "default", "neutral" },
+            _ => Array.Empty<string>()
+        };
+
+        if (!allowed.Contains(preset, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Invalid preset '{preset}' for {documentType}. Allowed presets: {string.Join(", ", allowed)}.");
+        }
+    }
+
+    public string ListStylePresets(string sessionId)
+    {
+        var session = GetSession(sessionId);
+        var presets = session.DocumentType switch
+        {
+            OfficeDocumentType.Word => new[] { "default" },
+            OfficeDocumentType.Excel => new[] { "default" },
+            OfficeDocumentType.PowerPoint => new[] { "default", "neutral" },
+            _ => Array.Empty<string>()
+        };
+
+        return JsonSerializer.Serialize(new
+        {
+            documentType = session.DocumentType.ToString(),
+            presets
         });
     }
 
@@ -2125,6 +2193,44 @@ public class OfficeSessionService
 
     private static string GetErrorCode(Exception ex)
     {
+        if (ex.Message.Contains("Invalid batch payload", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("Operation entry", StringComparison.OrdinalIgnoreCase))
+        {
+            return "InvalidBatchPayload";
+        }
+
+        if (ex.Message.Contains("Missing '", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MissingField";
+        }
+
+        if (ex.Message.Contains("not supported in batch execution", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("Unsupported batch operation", StringComparison.OrdinalIgnoreCase))
+        {
+            return "UnknownOperation";
+        }
+
+        if (ex.Message.Contains("read-only", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ReadOnlySession";
+        }
+
+        if (ex.Message.Contains("expects", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("document type", StringComparison.OrdinalIgnoreCase))
+        {
+            return "WrongDocumentType";
+        }
+
+        if (ex.Message.Contains("Anchor text", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AnchorNotFound";
+        }
+
+        if (ex.Message.Contains("Invalid preset", StringComparison.OrdinalIgnoreCase))
+        {
+            return "InvalidPreset";
+        }
+
         return ex switch
         {
             InvalidOperationException => "InvalidOperation",
