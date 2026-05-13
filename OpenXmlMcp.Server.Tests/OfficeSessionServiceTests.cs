@@ -562,8 +562,10 @@ public class OfficeSessionServiceTests
 
             Assert.NotNull(presentationPart);
             Assert.NotEmpty(presentationPart!.SlideMasterParts);
-            Assert.NotNull(presentationPart.SlideMasterParts.First().ThemePart);
-            Assert.NotEmpty(presentationPart.SlideMasterParts.First().SlideLayoutParts);
+            var slideMasterPart = presentationPart.SlideMasterParts.First();
+            Assert.NotNull(slideMasterPart.ThemePart);
+            Assert.NotEmpty(slideMasterPart.SlideLayoutParts);
+            Assert.Equal("Office", slideMasterPart.ThemePart!.Theme?.Name?.Value);
         }
         finally
         {
@@ -614,6 +616,102 @@ public class OfficeSessionServiceTests
             Assert.Contains("\"matchCount\":1", findResult, StringComparison.OrdinalIgnoreCase);
 
             service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ValidateOperation_AcceptsPowerPointAddSlideAlias()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            var payload = service.ValidateOperation(sessionId, "power_point_add_slide");
+
+            Assert.Contains("\"isValid\":true", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void BatchExecute_FailurePayload_ContainsIndexAndErrorCode()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var payload = service.BatchExecute(sessionId,
+                "[{\"operation\":\"word_append_paragraph\"},{\"operation\":\"word_append_paragraph\",\"text\":\"ok\"}]");
+
+            Assert.Contains("\"failed\":1", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"index\":0", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"errorCode\":\"InvalidOperation\"", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"executed\":1", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ValidateOperation_AcceptsApplyStylePreset()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            var payload = service.ValidateOperation(sessionId, "apply_style_preset");
+
+            Assert.Contains("\"isValid\":true", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ApplyStylePreset_PowerPointNeutral_UpdatesThemeName()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.ApplyStylePreset(sessionId, "neutral");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var themeName = presentation.PresentationPart?
+                .SlideMasterParts
+                .First()
+                .ThemePart?
+                .Theme?
+                .Name?
+                .Value;
+
+            Assert.Equal("Neutral", themeName);
         }
         finally
         {

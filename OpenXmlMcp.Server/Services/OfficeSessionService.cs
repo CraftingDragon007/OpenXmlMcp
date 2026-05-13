@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DocumentFormat.OpenXml;
@@ -170,75 +169,28 @@ public class OfficeSessionService
         ArgumentException.ThrowIfNullOrWhiteSpace(operationName);
         var session = GetSession(sessionId);
 
-        var normalized = operationName.Trim().ToLowerInvariant();
-        var requiresWrite = normalized is
-            "word_append_paragraph" or
-            "word_insert_paragraph_at" or
-            "word_replace_text" or
-            "word_add_heading" or
-            "word_add_bulleted_list" or
-            "word_add_table" or
-            "excel_set_cell_value" or
-            "excel_set_range_values" or
-            "excel_set_formula" or
-            "excel_add_worksheet" or
-            "powerpoint_add_slide" or
-            "power_point_add_slide" or
-            "powerpoint_insert_slide_at" or
-            "power_point_insert_slide_at" or
-            "powerpoint_set_slide_title" or
-            "power_point_set_slide_title" or
-            "powerpoint_set_slide_body" or
-            "power_point_set_slide_body" or
-            "powerpoint_reorder_slide" or
-            "power_point_reorder_slide" or
-            "powerpoint_delete_slide" or
-            "power_point_delete_slide" or
-            "powerpoint_add_bullet_slide" or
-            "power_point_add_bullet_slide" or
-            "batch_execute" or
-            "undo_last_change";
-        var expectedType = normalized switch
-        {
-            "word_append_paragraph" => OfficeDocumentType.Word,
-            "word_insert_paragraph_at" => OfficeDocumentType.Word,
-            "word_replace_text" => OfficeDocumentType.Word,
-            "word_add_heading" => OfficeDocumentType.Word,
-            "word_add_bulleted_list" => OfficeDocumentType.Word,
-            "word_add_table" => OfficeDocumentType.Word,
-            "excel_set_cell_value" or "excel_get_cell_value" => OfficeDocumentType.Excel,
-            "excel_set_range_values" => OfficeDocumentType.Excel,
-            "excel_set_formula" or "excel_get_formula" or "excel_get_used_range" => OfficeDocumentType.Excel,
-            "excel_add_worksheet" => OfficeDocumentType.Excel,
-            "powerpoint_add_slide" or "power_point_add_slide" => OfficeDocumentType.PowerPoint,
-            "powerpoint_insert_slide_at" or "power_point_insert_slide_at" => OfficeDocumentType.PowerPoint,
-            "powerpoint_set_slide_title" or "power_point_set_slide_title" => OfficeDocumentType.PowerPoint,
-            "powerpoint_set_slide_body" or "power_point_set_slide_body" => OfficeDocumentType.PowerPoint,
-            "powerpoint_reorder_slide" or "power_point_reorder_slide" => OfficeDocumentType.PowerPoint,
-            "powerpoint_delete_slide" or "power_point_delete_slide" => OfficeDocumentType.PowerPoint,
-            "powerpoint_add_bullet_slide" or "power_point_add_bullet_slide" => OfficeDocumentType.PowerPoint,
-            _ => (OfficeDocumentType?)null
-        };
+        var normalized = NormalizeOperationName(operationName);
+        var spec = TryGetOperationSpec(normalized);
 
         var warnings = new List<string>();
         var isValid = true;
 
-        if (expectedType is null && normalized is not "find_text" and not "list_structure" and not "get_document_info" and not "save_document" and not "close_document" and not "batch_execute" and not "get_operation_history" and not "undo_last_change")
+        if (spec is null)
         {
             isValid = false;
             warnings.Add($"Unknown operation '{operationName}'.");
         }
 
-        if (requiresWrite && session.IsReadOnly)
+        if (spec?.RequiresWrite == true && session.IsReadOnly)
         {
             isValid = false;
             warnings.Add("Session is read-only.");
         }
 
-        if (expectedType is not null && session.DocumentType != expectedType.Value)
+        if (spec?.ExpectedType is not null && session.DocumentType != spec.ExpectedType.Value)
         {
             isValid = false;
-            warnings.Add($"Operation '{operationName}' expects '{expectedType.Value}' document type.");
+            warnings.Add($"Operation '{operationName}' expects '{spec.ExpectedType.Value}' document type.");
         }
 
         var payload = new
@@ -455,8 +407,9 @@ public class OfficeSessionService
         var executed = 0;
         var failures = new List<object>();
 
-        foreach (var op in operations)
+        for (var index = 0; index < operations.Count; index++)
         {
+            var op = operations[index];
             if (op is null)
             {
                 continue;
@@ -470,7 +423,7 @@ public class OfficeSessionService
             }
             catch (Exception ex)
             {
-                failures.Add(new { operation, error = ex.Message });
+                failures.Add(new { operation, index, errorCode = GetErrorCode(ex), error = ex.Message });
             }
         }
 
@@ -481,6 +434,86 @@ public class OfficeSessionService
             failed = failures.Count,
             failures
         });
+    }
+
+    public void ApplyStylePreset(string sessionId, string preset = "default")
+    {
+        var currentSession = GetSession(sessionId);
+        var session = GetWritableSession(sessionId, currentSession.DocumentType);
+        var normalizedPreset = string.IsNullOrWhiteSpace(preset) ? "default" : preset.Trim().ToLowerInvariant();
+
+        ExecuteWriteOperation(session, "apply_style_preset", () =>
+        {
+            switch (session.DocumentType)
+            {
+                case OfficeDocumentType.Word:
+                    ApplyWordStylePreset(session.FilePath);
+                    break;
+                case OfficeDocumentType.Excel:
+                    ApplyExcelStylePreset(session.FilePath);
+                    break;
+                case OfficeDocumentType.PowerPoint:
+                    ApplyPowerPointStylePreset(session.FilePath, normalizedPreset);
+                    break;
+                default:
+                    throw new InvalidOperationException("Unsupported document type.");
+            }
+        });
+    }
+
+    private static void ApplyWordStylePreset(string filePath)
+    {
+        using var document = WordprocessingDocument.Open(filePath, true);
+        var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+        var stylePart = mainPart.StyleDefinitionsPart ?? mainPart.AddNewPart<StyleDefinitionsPart>();
+        stylePart.Styles ??= new W.Styles();
+
+        if (!stylePart.Styles.Elements<W.DocDefaults>().Any())
+        {
+            stylePart.Styles.Append(new W.DocDefaults(
+                new W.RunPropertiesDefault(new W.RunPropertiesBaseStyle(
+                    new W.RunFonts { Ascii = "Calibri", HighAnsi = "Calibri" },
+                    new W.FontSize { Val = "22" }))));
+        }
+
+        stylePart.Styles.Save();
+    }
+
+    private static void ApplyExcelStylePreset(string filePath)
+    {
+        using var spreadsheet = SpreadsheetDocument.Open(filePath, true);
+        var workbookPart = GetWorkbookPart(spreadsheet);
+        var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet ??= new Stylesheet(
+            new DocumentFormat.OpenXml.Spreadsheet.Fonts(
+                new DocumentFormat.OpenXml.Spreadsheet.Font(
+                    new FontName { Val = "Calibri" },
+                    new DocumentFormat.OpenXml.Spreadsheet.FontSize { Val = 11D }))
+            { Count = 1U },
+            new Fills(
+                new Fill(new PatternFill { PatternType = PatternValues.None }),
+                new Fill(new PatternFill { PatternType = PatternValues.Gray125 }))
+            { Count = 2U },
+            new Borders(new DocumentFormat.OpenXml.Spreadsheet.Border()) { Count = 1U },
+            new CellStyleFormats(new CellFormat()) { Count = 1U },
+            new CellFormats(new CellFormat()) { Count = 1U });
+
+        stylesPart.Stylesheet.Save();
+        GetWorkbook(workbookPart).Save();
+    }
+
+    private static void ApplyPowerPointStylePreset(string filePath, string preset)
+    {
+        using var presentation = PresentationDocument.Open(filePath, true);
+        var presentationPart = GetPresentationPart(presentation);
+        _ = EnsurePresentationDefaults(presentationPart);
+
+        var slideMasterPart = presentationPart.SlideMasterParts.First();
+        var themePart = slideMasterPart.ThemePart ?? slideMasterPart.AddNewPart<ThemePart>();
+        WriteDefaultTheme(themePart, ResolveThemeOptions(preset));
+
+        slideMasterPart.SlideMaster?.Save();
+        presentationPart.Presentation?.Save();
     }
 
     public void WordAppendParagraph(string sessionId, string text)
@@ -926,7 +959,7 @@ public class OfficeSessionService
             }),
             new TextStyles(new TitleStyle(), new BodyStyle(), new OtherStyle()));
 
-        WriteDefaultTheme(themePart);
+        WriteDefaultTheme(themePart, ResolveThemeOptions("default"));
         _ = presentationPart.AddPart(themePart);
 
         presentation.SlideMasterIdList ??= new SlideMasterIdList();
@@ -1008,28 +1041,90 @@ public class OfficeSessionService
                 new A.Paragraph(new A.EndParagraphRunProperties())));
     }
 
-    private static void WriteDefaultTheme(ThemePart themePart)
+    private static void WriteDefaultTheme(ThemePart themePart, PresentationThemeOptions options)
     {
-        const string themeXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-            + "<a:theme xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" name=\"Office\">"
-            + "<a:themeElements>"
-            + "<a:clrScheme name=\"Default\">"
-            + "<a:dk1><a:srgbClr val=\"000000\"/></a:dk1><a:lt1><a:srgbClr val=\"FFFFFF\"/></a:lt1>"
-            + "<a:dk2><a:srgbClr val=\"1F497D\"/></a:dk2><a:lt2><a:srgbClr val=\"EEECE1\"/></a:lt2>"
-            + "<a:accent1><a:srgbClr val=\"4F81BD\"/></a:accent1><a:accent2><a:srgbClr val=\"C0504D\"/></a:accent2>"
-            + "<a:accent3><a:srgbClr val=\"9BBB59\"/></a:accent3><a:accent4><a:srgbClr val=\"8064A2\"/></a:accent4>"
-            + "<a:accent5><a:srgbClr val=\"4BACC6\"/></a:accent5><a:accent6><a:srgbClr val=\"F79646\"/></a:accent6>"
-            + "<a:hlink><a:srgbClr val=\"0000FF\"/></a:hlink><a:folHlink><a:srgbClr val=\"800080\"/></a:folHlink>"
-            + "</a:clrScheme>"
-            + "<a:fontScheme name=\"Office\"><a:majorFont><a:latin typeface=\"Arial\"/></a:majorFont><a:minorFont><a:latin typeface=\"Arial\"/></a:minorFont></a:fontScheme>"
-            + "<a:fmtScheme name=\"Office\"><a:fillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:fillStyleLst>"
-            + "<a:lnStyleLst><a:ln w=\"6350\"><a:prstDash val=\"solid\"/></a:ln><a:ln w=\"12700\"><a:prstDash val=\"solid\"/></a:ln><a:ln w=\"19050\"><a:prstDash val=\"solid\"/></a:ln></a:lnStyleLst>"
-            + "<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>"
-            + "<a:bgFillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:bgFillStyleLst>"
-            + "</a:fmtScheme></a:themeElements></a:theme>";
+        var theme = new A.Theme { Name = options.Name };
+        var colorScheme = new A.ColorScheme { Name = "Default" };
+        colorScheme.Append(
+            new A.Dark1Color(new A.RgbColorModelHex { Val = options.Dark1 }),
+            new A.Light1Color(new A.RgbColorModelHex { Val = options.Light1 }),
+            new A.Dark2Color(new A.RgbColorModelHex { Val = options.Dark2 }),
+            new A.Light2Color(new A.RgbColorModelHex { Val = options.Light2 }),
+            new A.Accent1Color(new A.RgbColorModelHex { Val = options.Accent1 }),
+            new A.Accent2Color(new A.RgbColorModelHex { Val = options.Accent2 }),
+            new A.Accent3Color(new A.RgbColorModelHex { Val = options.Accent3 }),
+            new A.Accent4Color(new A.RgbColorModelHex { Val = options.Accent4 }),
+            new A.Accent5Color(new A.RgbColorModelHex { Val = options.Accent5 }),
+            new A.Accent6Color(new A.RgbColorModelHex { Val = options.Accent6 }),
+            new A.Hyperlink(new A.RgbColorModelHex { Val = options.Hyperlink }),
+            new A.FollowedHyperlinkColor(new A.RgbColorModelHex { Val = options.FollowedHyperlink }));
 
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(themeXml));
-        themePart.FeedData(stream);
+        var fontScheme = new A.FontScheme { Name = options.Name };
+        fontScheme.Append(
+            new A.MajorFont(new A.LatinFont { Typeface = options.MajorLatinFont }),
+            new A.MinorFont(new A.LatinFont { Typeface = options.MinorLatinFont }));
+
+        var formatScheme = new A.FormatScheme { Name = "Office" };
+        formatScheme.Append(
+            new A.FillStyleList(
+                new A.SolidFill(new A.SchemeColor { Val = A.SchemeColorValues.PhColor }),
+                new A.SolidFill(new A.SchemeColor { Val = A.SchemeColorValues.PhColor }),
+                new A.SolidFill(new A.SchemeColor { Val = A.SchemeColorValues.PhColor })),
+            new A.LineStyleList(
+                new A.Outline(new A.PresetDash { Val = A.PresetLineDashValues.Solid }) { Width = 6350 },
+                new A.Outline(new A.PresetDash { Val = A.PresetLineDashValues.Solid }) { Width = 12700 },
+                new A.Outline(new A.PresetDash { Val = A.PresetLineDashValues.Solid }) { Width = 19050 }),
+            new A.EffectStyleList(
+                new A.EffectStyle(new A.EffectList()),
+                new A.EffectStyle(new A.EffectList()),
+                new A.EffectStyle(new A.EffectList())),
+            new A.BackgroundFillStyleList(
+                new A.SolidFill(new A.SchemeColor { Val = A.SchemeColorValues.PhColor }),
+                new A.SolidFill(new A.SchemeColor { Val = A.SchemeColorValues.PhColor }),
+                new A.SolidFill(new A.SchemeColor { Val = A.SchemeColorValues.PhColor })));
+
+        theme.Append(new A.ThemeElements(colorScheme, fontScheme, formatScheme));
+        themePart.Theme = theme;
+        themePart.Theme.Save();
+    }
+
+    private static PresentationThemeOptions ResolveThemeOptions(string preset)
+    {
+        return preset switch
+        {
+            "neutral" => new PresentationThemeOptions(
+                Name: "Neutral",
+                Dark1: "1C1C1C",
+                Light1: "FFFFFF",
+                Dark2: "334155",
+                Light2: "E2E8F0",
+                Accent1: "2563EB",
+                Accent2: "0EA5E9",
+                Accent3: "10B981",
+                Accent4: "F59E0B",
+                Accent5: "EF4444",
+                Accent6: "8B5CF6",
+                Hyperlink: "1D4ED8",
+                FollowedHyperlink: "6D28D9",
+                MajorLatinFont: "Calibri",
+                MinorLatinFont: "Calibri"),
+            _ => new PresentationThemeOptions(
+                Name: "Office",
+                Dark1: "000000",
+                Light1: "FFFFFF",
+                Dark2: "1F497D",
+                Light2: "EEECE1",
+                Accent1: "4F81BD",
+                Accent2: "C0504D",
+                Accent3: "9BBB59",
+                Accent4: "8064A2",
+                Accent5: "4BACC6",
+                Accent6: "F79646",
+                Hyperlink: "0000FF",
+                FollowedHyperlink: "800080",
+                MajorLatinFont: "Arial",
+                MinorLatinFont: "Arial")
+        };
     }
 
     private static Slide BuildSimpleSlide(string title, string body)
@@ -1282,112 +1377,28 @@ public class OfficeSessionService
 
     private void ExecuteBatchOperation(string sessionId, string operation, JsonNode payload)
     {
-        switch (operation.Trim().ToLowerInvariant())
+        OfficeBatchDispatcher.Dispatch(this, sessionId, operation, payload);
+    }
+
+    private static string NormalizeOperationName(string operationName)
+    {
+        return operationName.Trim().ToLowerInvariant();
+    }
+
+    private static OfficeOperationSpec? TryGetOperationSpec(string normalizedOperation)
+    {
+        return OfficeOperationRegistry.TryGet(normalizedOperation);
+    }
+
+    private static string GetErrorCode(Exception ex)
+    {
+        return ex switch
         {
-            case "word_append_paragraph":
-                WordAppendParagraph(sessionId, payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."));
-                break;
-            case "word_add_table":
-                WordAddTable(sessionId, payload["rows"]?.GetValue<int>() ?? 0, payload["columns"]?.GetValue<int>() ?? 0);
-                break;
-            case "word_insert_paragraph_at":
-                WordInsertParagraphAt(
-                    sessionId,
-                    payload["index"]?.GetValue<int>() ?? 0,
-                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."));
-                break;
-            case "word_replace_text":
-                WordReplaceText(
-                    sessionId,
-                    payload["find"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'find'."),
-                    payload["replace"]?.GetValue<string>() ?? string.Empty,
-                    payload["matchCase"]?.GetValue<bool>() ?? false);
-                break;
-            case "word_add_heading":
-                WordAddHeading(
-                    sessionId,
-                    payload["level"]?.GetValue<int>() ?? 1,
-                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."));
-                break;
-            case "word_add_bulleted_list":
-                WordAddBulletedList(
-                    sessionId,
-                    payload["lines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'lines'."));
-                break;
-            case "excel_set_cell_value":
-                ExcelSetCellValue(
-                    sessionId,
-                    payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."),
-                    payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."),
-                    payload["value"]?.GetValue<string>() ?? string.Empty);
-                break;
-            case "excel_set_range_values":
-                ExcelSetRangeValues(
-                    sessionId,
-                    payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."),
-                    payload["startCell"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'startCell'."),
-                    payload["valuesJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'valuesJson'."));
-                break;
-            case "excel_set_formula":
-                ExcelSetFormula(
-                    sessionId,
-                    payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."),
-                    payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."),
-                    payload["formula"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'formula'."));
-                break;
-            case "excel_add_worksheet":
-                ExcelAddWorksheet(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."));
-                break;
-            case "powerpoint_add_slide":
-                PowerPointAddSlide(
-                    sessionId,
-                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."),
-                    payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'."));
-                break;
-            case "powerpoint_insert_slide_at":
-            case "power_point_insert_slide_at":
-                PowerPointInsertSlideAt(
-                    sessionId,
-                    payload["index"]?.GetValue<int>() ?? 0,
-                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."),
-                    payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'."));
-                break;
-            case "powerpoint_set_slide_title":
-            case "power_point_set_slide_title":
-                PowerPointSetSlideTitle(
-                    sessionId,
-                    payload["slideIndex"]?.GetValue<int>() ?? 0,
-                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."));
-                break;
-            case "powerpoint_set_slide_body":
-            case "power_point_set_slide_body":
-                PowerPointSetSlideBody(
-                    sessionId,
-                    payload["slideIndex"]?.GetValue<int>() ?? 0,
-                    payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'."));
-                break;
-            case "powerpoint_reorder_slide":
-            case "power_point_reorder_slide":
-                PowerPointReorderSlide(
-                    sessionId,
-                    payload["fromIndex"]?.GetValue<int>() ?? 0,
-                    payload["toIndex"]?.GetValue<int>() ?? 0);
-                break;
-            case "powerpoint_delete_slide":
-            case "power_point_delete_slide":
-                PowerPointDeleteSlide(
-                    sessionId,
-                    payload["slideIndex"]?.GetValue<int>() ?? 0);
-                break;
-            case "powerpoint_add_bullet_slide":
-                PowerPointAddBulletSlide(
-                    sessionId,
-                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."),
-                    payload["bulletLines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'bulletLines'."));
-                break;
-            default:
-                throw new InvalidOperationException($"Unsupported batch operation '{operation}'.");
-        }
+            InvalidOperationException => "InvalidOperation",
+            ArgumentException => "InvalidArgument",
+            JsonException => "InvalidJson",
+            _ => "UnhandledError"
+        };
     }
 
     private OfficeSession GetSession(string sessionId)

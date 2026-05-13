@@ -31,6 +31,17 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 - `excel_add_worksheet(sessionId, sheetName)` adds a worksheet to Excel.
 - `powerpoint_add_bullet_slide(sessionId, title, bulletLines)` adds a bullet-style slide.
 - `batch_execute(sessionId, operationsJson)` executes a JSON array of operations and returns per-operation results.
+- `apply_style_preset(sessionId, preset)` applies cross-suite style defaults (`default`, `neutral`).
+
+## Universal operation contract (Phase 5 foundation)
+
+- `validate_operation` and `batch_execute` now use the same internal operation registry.
+- Operation aliases are normalized to a canonical name (for example `powerpoint_*` and `power_point_*`).
+- Write safety rules are shared across suites: write operations are rejected in read-only sessions.
+- Type safety rules are shared across suites: operation document type must match session document type.
+- Batch failure entries include `operation`, `index`, `errorCode`, and `error` for consistent diagnostics.
+- PPTX default theme is generated programmatically with OpenXML objects (no embedded raw theme XML).
+- Batch dispatch is isolated in a dedicated dispatcher service for cleaner separation of concerns.
 
 ## Phase 3 tools
 

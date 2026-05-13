@@ -284,6 +284,15 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Applies a cross-suite style preset to the active document session.")]
+    public void ApplyStylePreset(
+        [Description("Active session id.")] string sessionId,
+        [Description("Style preset name, e.g. default or neutral.")] string preset = "default")
+    {
+        officeSessionService.ApplyStylePreset(sessionId, preset);
+    }
+
+    [McpServerTool]
     [Description("Returns operation history entries for a session.")]
     public string GetOperationHistory(
         [Description("Active session id.")] string sessionId)
