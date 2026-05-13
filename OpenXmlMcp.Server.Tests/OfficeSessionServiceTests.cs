@@ -718,4 +718,148 @@ public class OfficeSessionServiceTests
             DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void WordSetParagraphStyle_AppliesFormatting()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Styled text");
+            service.WordSetParagraphStyle(sessionId, 1, "Calibri", 20, bold: true, italic: true, colorHex: "FF0000");
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var runProperties = document.MainDocumentPart?
+                .Document?
+                .Body?
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                .First()
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Run>()
+                .First()
+                .RunProperties;
+
+            Assert.NotNull(runProperties);
+            Assert.NotNull(runProperties!.Bold);
+            Assert.NotNull(runProperties.Italic);
+            Assert.Equal("FF0000", runProperties.Color?.Val?.Value);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSetCellStyle_AppliesStyleIndex()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelSetCellValue(sessionId, "Sheet1", "A1", "Styled");
+            service.ExcelSetCellStyle(sessionId, "Sheet1", "A1", "Calibri", 12, bold: true, italic: false, colorHex: "112233");
+            service.CloseDocument(sessionId);
+
+            using var spreadsheet = SpreadsheetDocument.Open(filePath, false);
+            var worksheet = spreadsheet.WorkbookPart!
+                .WorksheetParts
+                .First()
+                .Worksheet!;
+            var cell = worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Cell>()
+                .First(c => string.Equals(c.CellReference?.Value, "A1", StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(cell.StyleIndex?.Value > 0);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointSetTextStyle_AndApplyTextPreset_Work()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Title", "Body");
+            service.PowerPointSetTextStyle(sessionId, 1, 0, "Calibri", 30, bold: true, italic: false, colorHex: "AA0000");
+            service.ApplyTextPreset(sessionId, "subtitle", 1);
+
+            var payload = service.ValidateOperation(sessionId, "apply_text_preset");
+            Assert.Contains("\"isValid\":true", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAddNumberedList_UsesDecimalDotByDefault()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddNumberedList(sessionId, "One\nTwo");
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var paragraph = document.MainDocumentPart?.Document?.Body?.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>().First();
+            var numberingProps = paragraph?.ParagraphProperties?.NumberingProperties;
+
+            Assert.NotNull(numberingProps);
+            Assert.Equal(0, numberingProps!.NumberingLevelReference?.Val?.Value);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAddStructuredList_SupportsNestedMixedKinds()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var itemsJson = "[" +
+                "{\"text\":\"Top 1\",\"level\":0,\"kind\":\"numbered\"}," +
+                "{\"text\":\"Nested A\",\"level\":1,\"kind\":\"bulleted\",\"bulletStyle\":\"disc\"}," +
+                "{\"text\":\"Nested B\",\"level\":1,\"kind\":\"bulleted\",\"bulletStyle\":\"square\"}" +
+                "]";
+            service.WordAddStructuredList(sessionId, itemsJson);
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var paragraphs = document.MainDocumentPart?.Document?.Body?.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>().ToList()
+                ?? throw new InvalidOperationException("Paragraphs missing.");
+
+            Assert.Equal(3, paragraphs.Count);
+            Assert.Equal(0, paragraphs[0].ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value);
+            Assert.Equal(1, paragraphs[1].ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value);
+            Assert.Equal(1, paragraphs[2].ParagraphProperties?.NumberingProperties?.NumberingLevelReference?.Val?.Value);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
 }

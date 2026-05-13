@@ -84,6 +84,21 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Applies font style to a paragraph by 1-based index in a DOCX session.")]
+    public void WordSetParagraphStyle(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based paragraph index.")] int paragraphIndex,
+        [Description("Font family name.")] string fontName,
+        [Description("Font size in points (8-96).")]
+        int fontSize,
+        [Description("Whether text is bold.")] bool bold,
+        [Description("Whether text is italic.")] bool italic,
+        [Description("Hex text color without '#', e.g. FF0000.")] string colorHex)
+    {
+        officeSessionService.WordSetParagraphStyle(sessionId, paragraphIndex, fontName, fontSize, bold, italic, colorHex);
+    }
+
+    [McpServerTool]
     [Description("Inserts a paragraph at a 1-based index in a DOCX session.")]
     public void WordInsertParagraphAt(
         [Description("Active DOCX session id.")] string sessionId,
@@ -118,9 +133,32 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     [Description("Adds a bulleted list to a DOCX session using newline-separated items.")]
     public void WordAddBulletedList(
         [Description("Active DOCX session id.")] string sessionId,
-        [Description("Newline-separated bullet lines.")] string lines)
+        [Description("Newline-separated bullet lines.")] string lines,
+        [Description("Bullet style (default: disc).")]
+        string bulletStyle = "disc")
     {
-        officeSessionService.WordAddBulletedList(sessionId, lines);
+        officeSessionService.WordAddBulletedList(sessionId, lines, bulletStyle);
+    }
+
+    [McpServerTool]
+    [Description("Adds a numbered list to a DOCX session using newline-separated items.")]
+    public void WordAddNumberedList(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Newline-separated numbered lines.")] string lines,
+        [Description("Number style (default: decimal-dot).")]
+        string numberStyle = "decimal-dot")
+    {
+        officeSessionService.WordAddNumberedList(sessionId, lines, numberStyle);
+    }
+
+    [McpServerTool]
+    [Description("Adds a structured mixed list (numbered/bulleted, nested) from JSON items.")]
+    public void WordAddStructuredList(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("JSON array of items: text, level, kind, optional bulletStyle/numberStyle.")]
+        string itemsJson)
+    {
+        officeSessionService.WordAddStructuredList(sessionId, itemsJson);
     }
 
     [McpServerTool]
@@ -142,6 +180,22 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Cell value.")] string value)
     {
         officeSessionService.ExcelSetCellValue(sessionId, sheetName, cellReference, value);
+    }
+
+    [McpServerTool]
+    [Description("Applies font style to an XLSX cell.")]
+    public void ExcelSetCellStyle(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName,
+        [Description("Cell reference, e.g. A1.")] string cellReference,
+        [Description("Font family name.")] string fontName,
+        [Description("Font size in points (8-96).")]
+        int fontSize,
+        [Description("Whether text is bold.")] bool bold,
+        [Description("Whether text is italic.")] bool italic,
+        [Description("Hex text color without '#', e.g. FF0000.")] string colorHex)
+    {
+        officeSessionService.ExcelSetCellStyle(sessionId, sheetName, cellReference, fontName, fontSize, bold, italic, colorHex);
     }
 
     [McpServerTool]
@@ -246,6 +300,23 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Applies font style to a text slot on a slide (slot 0=title, 1=body).")]
+    public void PowerPointSetTextStyle(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex,
+        [Description("Text slot index (0=title, 1=body).")]
+        int slot,
+        [Description("Font family name.")] string fontName,
+        [Description("Font size in points (8-96).")]
+        int fontSize,
+        [Description("Whether text is bold.")] bool bold,
+        [Description("Whether text is italic.")] bool italic,
+        [Description("Hex text color without '#', e.g. FF0000.")] string colorHex)
+    {
+        officeSessionService.PowerPointSetTextStyle(sessionId, slideIndex, slot, fontName, fontSize, bold, italic, colorHex);
+    }
+
+    [McpServerTool]
     [Description("Moves a slide from one 1-based index to another.")]
     public void PowerPointReorderSlide(
         [Description("Active PPTX session id.")] string sessionId,
@@ -290,6 +361,16 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Style preset name, e.g. default or neutral.")] string preset = "default")
     {
         officeSessionService.ApplyStylePreset(sessionId, preset);
+    }
+
+    [McpServerTool]
+    [Description("Applies text presets such as title or subtitle.")]
+    public void ApplyTextPreset(
+        [Description("Active session id.")] string sessionId,
+        [Description("Text preset: default, title, subtitle.")] string preset,
+        [Description("Target index: paragraph/slide index depending on document type.")] int targetIndex = 1)
+    {
+        officeSessionService.ApplyTextPreset(sessionId, preset, targetIndex);
     }
 
     [McpServerTool]

@@ -324,30 +324,61 @@ public class OfficeSessionService
         });
     }
 
-    public void WordAddBulletedList(string sessionId, string lines)
+    public void WordAddBulletedList(string sessionId, string lines, string bulletStyle = "disc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lines);
-        var items = lines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (items.Length == 0)
+        var items = lines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => new WordListItem(x, 0, "bulleted", BulletStyle: bulletStyle))
+            .ToArray();
+        WordAddStructuredList(sessionId, JsonSerializer.Serialize(items));
+    }
+
+    public void WordAddNumberedList(string sessionId, string lines, string numberStyle = "decimal-dot")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(lines);
+        var items = lines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => new WordListItem(x, 0, "numbered", NumberStyle: numberStyle))
+            .ToArray();
+        WordAddStructuredList(sessionId, JsonSerializer.Serialize(items));
+    }
+
+    public void WordAddStructuredList(string sessionId, string itemsJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(itemsJson);
+        var items = JsonSerializer.Deserialize<List<WordListItem>>(itemsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("Invalid itemsJson for structured list.");
+        if (items.Count == 0)
         {
-            throw new InvalidOperationException("At least one bullet line is required.");
+            throw new InvalidOperationException("At least one list item is required.");
+        }
+
+        if (items.Any(i => string.IsNullOrWhiteSpace(i.Text)))
+        {
+            throw new InvalidOperationException("List items must contain text.");
+        }
+
+        if (items.Any(i => i.Level < 0 || i.Level > 8))
+        {
+            throw new InvalidOperationException("List levels must be between 0 and 8.");
         }
 
         var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
-        ExecuteWriteOperation(session, "word_add_bulleted_list", () =>
+        ExecuteWriteOperation(session, "word_add_structured_list", () =>
         {
             using var document = WordprocessingDocument.Open(session.FilePath, true);
             var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
-            var numberingId = EnsureBulletNumbering(document);
+            var definitions = EnsureStructuredListNumbering(document, items);
 
             foreach (var item in items)
             {
+                var normalizedKind = NormalizeListKind(item.Kind);
+                var numberingId = normalizedKind == "numbered" ? definitions.NumberedNumberingId : definitions.BulletedNumberingId;
                 var paragraph = new W.Paragraph(
                     new W.ParagraphProperties(
                         new W.NumberingProperties(
-                            new W.NumberingLevelReference { Val = 0 },
+                            new W.NumberingLevelReference { Val = item.Level },
                             new W.NumberingId { Val = numberingId })),
-                    new W.Run(new W.Text(item)));
+                    new W.Run(new W.Text(item.Text)));
                 body.Append(paragraph);
             }
 
@@ -458,6 +489,122 @@ public class OfficeSessionService
                 default:
                     throw new InvalidOperationException("Unsupported document type.");
             }
+        });
+    }
+
+    public void ApplyTextPreset(string sessionId, string preset, int targetIndex = 1)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(preset);
+        var session = GetSession(sessionId);
+        var normalized = preset.Trim().ToLowerInvariant();
+
+        switch (session.DocumentType)
+        {
+            case OfficeDocumentType.Word:
+                WordSetParagraphStyle(sessionId, targetIndex, BuildTextStyleFromPreset(normalized, isTitleSlot: true));
+                break;
+            case OfficeDocumentType.Excel:
+                ExcelSetCellStyle(sessionId, "Sheet1", "A1", BuildTextStyleFromPreset(normalized, isTitleSlot: true));
+                break;
+            case OfficeDocumentType.PowerPoint:
+                PowerPointSetTextStyle(sessionId, targetIndex, 0, BuildTextStyleFromPreset(normalized, isTitleSlot: true));
+                if (normalized is "title" or "subtitle")
+                {
+                    PowerPointSetTextStyle(sessionId, targetIndex, 1, BuildTextStyleFromPreset(normalized, isTitleSlot: false));
+                }
+
+                break;
+            default:
+                throw new InvalidOperationException("Unsupported document type.");
+        }
+    }
+
+    public void WordSetParagraphStyle(string sessionId, int paragraphIndex, string fontName, int fontSize, bool bold, bool italic, string colorHex)
+    {
+        WordSetParagraphStyle(sessionId, paragraphIndex, new TextStyle(fontName, fontSize, bold, italic, colorHex));
+    }
+
+    public void ExcelSetCellStyle(string sessionId, string sheetName, string cellReference, string fontName, int fontSize, bool bold, bool italic, string colorHex)
+    {
+        ExcelSetCellStyle(sessionId, sheetName, cellReference, new TextStyle(fontName, fontSize, bold, italic, colorHex));
+    }
+
+    public void PowerPointSetTextStyle(string sessionId, int slideIndex, int slot, string fontName, int fontSize, bool bold, bool italic, string colorHex)
+    {
+        PowerPointSetTextStyle(sessionId, slideIndex, slot, new TextStyle(fontName, fontSize, bold, italic, colorHex));
+    }
+
+    private void WordSetParagraphStyle(string sessionId, int paragraphIndex, TextStyle style)
+    {
+        ValidateTextStyle(style);
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_set_paragraph_style", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+
+            if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
+            {
+                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count}.");
+            }
+
+            ApplyWordParagraphStyle(paragraphs[paragraphIndex - 1], style);
+            document.MainDocumentPart.Document?.Save();
+        });
+    }
+
+    private void ExcelSetCellStyle(string sessionId, string sheetName, string cellReference, TextStyle style)
+    {
+        ValidateTextStyle(style);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sheetName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cellReference);
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Excel);
+        ExecuteWriteOperation(session, "excel_set_cell_style", () =>
+        {
+            using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, true);
+            var workbookPart = GetWorkbookPart(spreadsheet);
+            var sheet = GetSheetByName(workbookPart, sheetName);
+            var worksheetPart = GetWorksheetPart(workbookPart, sheet);
+            var worksheet = GetWorksheet(worksheetPart);
+            var sheetData = worksheet.GetFirstChild<SheetData>() ?? worksheet.AppendChild(new SheetData());
+
+            var rowIndex = ParseRowIndex(cellReference);
+            var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIndex);
+            if (row is null)
+            {
+                row = new Row { RowIndex = rowIndex };
+                sheetData.Append(row);
+            }
+
+            var normalizedRef = cellReference.ToUpperInvariant();
+            var cell = row.Elements<Cell>().FirstOrDefault(c => string.Equals(c.CellReference?.Value, normalizedRef, StringComparison.OrdinalIgnoreCase));
+            if (cell is null)
+            {
+                cell = new Cell { CellReference = normalizedRef, DataType = CellValues.String, CellValue = new CellValue(string.Empty) };
+                row.Append(cell);
+            }
+
+            var styleIndex = EnsureExcelCellFormat(workbookPart, style);
+            cell.StyleIndex = styleIndex;
+
+            worksheet.Save();
+            GetWorkbook(workbookPart).Save();
+        });
+    }
+
+    private void PowerPointSetTextStyle(string sessionId, int slideIndex, int slot, TextStyle style)
+    {
+        ValidateTextStyle(style);
+        var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
+
+        ExecuteWriteOperation(session, "powerpoint_set_text_style", () =>
+        {
+            using var presentation = PresentationDocument.Open(session.FilePath, true);
+            var slidePart = GetSlidePartByIndex(GetPresentationPart(presentation), slideIndex);
+            ApplyPowerPointSlotStyle(slidePart, slot, style);
+            GetSlide(slidePart).Save();
         });
     }
 
@@ -1203,6 +1350,161 @@ public class OfficeSessionService
         paragraph.Append(new A.Run(new A.Text(text)));
     }
 
+    private static void ApplyPowerPointSlotStyle(SlidePart slidePart, int slot, TextStyle style)
+    {
+        var paragraphs = GetSlide(slidePart)
+            .Descendants<P.Shape>()
+            .Select(shape => shape.TextBody)
+            .Where(textBody => textBody is not null)
+            .SelectMany(textBody => textBody!.Elements<A.Paragraph>())
+            .ToList();
+
+        if (paragraphs.Count == 0)
+        {
+            throw new InvalidOperationException("Slide does not contain editable text placeholders.");
+        }
+
+        var targetIndex = Math.Clamp(slot, 0, paragraphs.Count - 1);
+        var paragraph = paragraphs[targetIndex];
+        foreach (var run in paragraph.Elements<A.Run>())
+        {
+            run.RunProperties ??= new A.RunProperties();
+            ApplyDrawingRunProperties(run.RunProperties, style);
+        }
+
+        var endParagraphProperties = paragraph.GetFirstChild<A.EndParagraphRunProperties>() ?? paragraph.AppendChild(new A.EndParagraphRunProperties());
+        ApplyDrawingRunProperties(endParagraphProperties, style);
+    }
+
+    private static void ApplyWordParagraphStyle(W.Paragraph paragraph, TextStyle style)
+    {
+        foreach (var run in paragraph.Elements<W.Run>())
+        {
+            run.RunProperties ??= new W.RunProperties();
+            ApplyWordRunProperties(run.RunProperties, style);
+        }
+
+        var paragraphProperties = paragraph.ParagraphProperties ??= new W.ParagraphProperties();
+        paragraphProperties.ParagraphMarkRunProperties ??= new W.ParagraphMarkRunProperties();
+        ApplyWordParagraphMarkProperties(paragraphProperties.ParagraphMarkRunProperties, style);
+    }
+
+    private static void ApplyWordRunProperties(W.RunProperties runProperties, TextStyle style)
+    {
+        runProperties.RunFonts = new W.RunFonts { Ascii = style.FontName, HighAnsi = style.FontName, ComplexScript = style.FontName };
+        runProperties.FontSize = new W.FontSize { Val = (style.FontSize * 2).ToString() };
+        runProperties.Bold = style.Bold ? new W.Bold() : null;
+        runProperties.Italic = style.Italic ? new W.Italic() : null;
+        runProperties.Color = new W.Color { Val = style.ColorHex };
+    }
+
+    private static void ApplyWordParagraphMarkProperties(W.ParagraphMarkRunProperties markProperties, TextStyle style)
+    {
+        markProperties.RemoveAllChildren();
+        markProperties.Append(new W.RunFonts { Ascii = style.FontName, HighAnsi = style.FontName, ComplexScript = style.FontName });
+        markProperties.Append(new W.FontSize { Val = (style.FontSize * 2).ToString() });
+        if (style.Bold)
+        {
+            markProperties.Append(new W.Bold());
+        }
+
+        if (style.Italic)
+        {
+            markProperties.Append(new W.Italic());
+        }
+
+        markProperties.Append(new W.Color { Val = style.ColorHex });
+    }
+
+    private static void ApplyDrawingRunProperties(A.TextCharacterPropertiesType runProperties, TextStyle style)
+    {
+        runProperties.FontSize = style.FontSize * 100;
+        runProperties.Bold = style.Bold;
+        runProperties.Italic = style.Italic;
+        runProperties.RemoveAllChildren<A.LatinFont>();
+        runProperties.Append(new A.LatinFont { Typeface = style.FontName });
+        runProperties.RemoveAllChildren<A.SolidFill>();
+        runProperties.Append(new A.SolidFill(new A.RgbColorModelHex { Val = style.ColorHex }));
+    }
+
+    private static TextStyle BuildTextStyleFromPreset(string preset, bool isTitleSlot)
+    {
+        return preset switch
+        {
+            "title" => isTitleSlot
+                ? new TextStyle("Calibri", 36, true, false, "1F497D")
+                : new TextStyle("Calibri", 22, false, false, "4F4F4F"),
+            "subtitle" => isTitleSlot
+                ? new TextStyle("Calibri", 28, true, false, "1F497D")
+                : new TextStyle("Calibri", 20, false, true, "666666"),
+            _ => new TextStyle("Calibri", 18, false, false, "000000")
+        };
+    }
+
+    private static void ValidateTextStyle(TextStyle style)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(style.FontName);
+        if (style.FontSize < 8 || style.FontSize > 96)
+        {
+            throw new InvalidOperationException("Font size must be between 8 and 96.");
+        }
+
+        if (!IsValidHexColor(style.ColorHex))
+        {
+            throw new InvalidOperationException("Color must be a 6-digit hex value like FF0000.");
+        }
+    }
+
+    private static bool IsValidHexColor(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 6)
+        {
+            return false;
+        }
+
+        return value.All(Uri.IsHexDigit);
+    }
+
+    private static uint EnsureExcelCellFormat(WorkbookPart workbookPart, TextStyle style)
+    {
+        var stylesPart = workbookPart.WorkbookStylesPart ?? workbookPart.AddNewPart<WorkbookStylesPart>();
+        stylesPart.Stylesheet ??= new Stylesheet(
+            new DocumentFormat.OpenXml.Spreadsheet.Fonts(new DocumentFormat.OpenXml.Spreadsheet.Font()) { Count = 1U },
+            new Fills(new Fill(new PatternFill { PatternType = PatternValues.None }), new Fill(new PatternFill { PatternType = PatternValues.Gray125 })) { Count = 2U },
+            new Borders(new DocumentFormat.OpenXml.Spreadsheet.Border()) { Count = 1U },
+            new CellStyleFormats(new CellFormat()) { Count = 1U },
+            new CellFormats(new CellFormat()) { Count = 1U });
+
+        var stylesheet = stylesPart.Stylesheet;
+        stylesheet.Fonts ??= new DocumentFormat.OpenXml.Spreadsheet.Fonts(new DocumentFormat.OpenXml.Spreadsheet.Font()) { Count = 1U };
+        stylesheet.CellFormats ??= new CellFormats(new CellFormat()) { Count = 1U };
+
+        var font = new DocumentFormat.OpenXml.Spreadsheet.Font(
+            new FontName { Val = style.FontName },
+            new DocumentFormat.OpenXml.Spreadsheet.FontSize { Val = style.FontSize },
+            new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = style.ColorHex });
+        if (style.Bold)
+        {
+            font.Append(new DocumentFormat.OpenXml.Spreadsheet.Bold());
+        }
+
+        if (style.Italic)
+        {
+            font.Append(new DocumentFormat.OpenXml.Spreadsheet.Italic());
+        }
+
+        stylesheet.Fonts.Append(font);
+        stylesheet.Fonts.Count = (uint)stylesheet.Fonts.Count();
+
+        var fontId = stylesheet.Fonts.Count.Value - 1;
+        var format = new CellFormat { FontId = fontId, ApplyFont = true };
+        stylesheet.CellFormats.Append(format);
+        stylesheet.CellFormats.Count = (uint)stylesheet.CellFormats.Count();
+
+        stylesheet.Save();
+        return stylesheet.CellFormats.Count.Value - 1;
+    }
+
     private static object ListWordStructure(string filePath)
     {
         using var document = WordprocessingDocument.Open(filePath, false);
@@ -1344,35 +1646,125 @@ public class OfficeSessionService
         return result.ToString();
     }
 
-    private static int EnsureBulletNumbering(WordprocessingDocument document)
+    private static ListNumberingDefinitions EnsureStructuredListNumbering(WordprocessingDocument document, IReadOnlyCollection<WordListItem> items)
     {
         var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
         var numberingPart = mainPart.NumberingDefinitionsPart ?? mainPart.AddNewPart<NumberingDefinitionsPart>();
         numberingPart.Numbering ??= new W.Numbering();
-
         var numbering = numberingPart.Numbering;
-        var existingNumbering = numbering.Elements<W.NumberingInstance>().FirstOrDefault();
-        if (existingNumbering?.NumberID?.Value is int existingId)
-        {
-            return existingId;
-        }
 
-        var abstractNumberingId = 1;
-        var numberingId = 1;
+        const int numberedAbstractId = 901;
+        const int bulletedAbstractId = 902;
+        const int numberedNumberingId = 901;
+        const int bulletedNumberingId = 902;
 
-        numbering.Append(new W.AbstractNum(
-                new W.Level(
-                    new W.NumberingFormat { Val = W.NumberFormatValues.Bullet },
-                    new W.LevelText { Val = "•" },
-                    new W.StartNumberingValue { Val = 1 })
-                { LevelIndex = 0 })
-            { AbstractNumberId = abstractNumberingId });
+        var maxLevel = items.Max(x => x.Level);
+        EnsureAbstractNumbering(numbering, numberedAbstractId, maxLevel, isNumbered: true, items);
+        EnsureAbstractNumbering(numbering, bulletedAbstractId, maxLevel, isNumbered: false, items);
 
-        numbering.Append(new W.NumberingInstance(new W.AbstractNumId { Val = abstractNumberingId })
-        { NumberID = numberingId });
+        EnsureNumberingInstance(numbering, numberedNumberingId, numberedAbstractId);
+        EnsureNumberingInstance(numbering, bulletedNumberingId, bulletedAbstractId);
 
         numbering.Save();
-        return numberingId;
+        return new ListNumberingDefinitions(numberedNumberingId, bulletedNumberingId);
+    }
+
+    private static void EnsureAbstractNumbering(W.Numbering numbering, int abstractId, int maxLevel, bool isNumbered, IReadOnlyCollection<WordListItem> items)
+    {
+        var existing = numbering.Elements<W.AbstractNum>().FirstOrDefault(a => a.AbstractNumberId?.Value == abstractId);
+        existing?.Remove();
+
+        var abstractNum = new W.AbstractNum { AbstractNumberId = abstractId };
+        for (var level = 0; level <= maxLevel; level++)
+        {
+            var style = isNumbered
+                ? ResolveNumberStyle(items, level)
+                : ResolveBulletStyle(items, level);
+            abstractNum.Append(BuildListLevel(level, style, isNumbered));
+        }
+
+        numbering.Append(abstractNum);
+    }
+
+    private static void EnsureNumberingInstance(W.Numbering numbering, int numberingId, int abstractId)
+    {
+        var existing = numbering.Elements<W.NumberingInstance>().FirstOrDefault(n => n.NumberID?.Value == numberingId);
+        existing?.Remove();
+        numbering.Append(new W.NumberingInstance(new W.AbstractNumId { Val = abstractId }) { NumberID = numberingId });
+    }
+
+    private static W.Level BuildListLevel(int level, string style, bool isNumbered)
+    {
+        var left = 720 * (level + 1);
+        var hanging = 360;
+        var numberingFormat = isNumbered ? ResolveNumberFormat(style) : W.NumberFormatValues.Bullet;
+        var levelText = isNumbered ? ResolveNumberLevelText(style, level) : ResolveBulletGlyph(style);
+
+        return new W.Level(
+            new W.StartNumberingValue { Val = 1 },
+            new W.NumberingFormat { Val = numberingFormat },
+            new W.LevelText { Val = levelText },
+            new W.LevelJustification { Val = W.LevelJustificationValues.Left },
+            new W.ParagraphProperties(new W.Indentation { Left = left.ToString(), Hanging = hanging.ToString() }),
+            new W.RunProperties(new W.RunFonts { Ascii = "Calibri", HighAnsi = "Calibri" }))
+        { LevelIndex = level };
+    }
+
+    private static string ResolveNumberStyle(IReadOnlyCollection<WordListItem> items, int level)
+    {
+        return items.FirstOrDefault(x => x.Level == level && NormalizeListKind(x.Kind) == "numbered")?.NumberStyle
+            ?.Trim().ToLowerInvariant()
+            ?? "decimal-dot";
+    }
+
+    private static string ResolveBulletStyle(IReadOnlyCollection<WordListItem> items, int level)
+    {
+        return items.FirstOrDefault(x => x.Level == level && NormalizeListKind(x.Kind) == "bulleted")?.BulletStyle
+            ?.Trim().ToLowerInvariant()
+            ?? "disc";
+    }
+
+    private static string NormalizeListKind(string kind)
+    {
+        var normalized = kind?.Trim().ToLowerInvariant();
+        return normalized is "numbered" or "ordered" ? "numbered" : "bulleted";
+    }
+
+    private static W.NumberFormatValues ResolveNumberFormat(string style)
+    {
+        return style switch
+        {
+            "upper-alpha-dot" => W.NumberFormatValues.UpperLetter,
+            "lower-alpha-paren" => W.NumberFormatValues.LowerLetter,
+            "upper-roman-dot" => W.NumberFormatValues.UpperRoman,
+            "lower-roman-dot" => W.NumberFormatValues.LowerRoman,
+            _ => W.NumberFormatValues.Decimal
+        };
+    }
+
+    private static string ResolveNumberLevelText(string style, int level)
+    {
+        var marker = $"%{level + 1}";
+        return style switch
+        {
+            "lower-alpha-paren" => $"{marker})",
+            "decimal-paren" => $"{marker})",
+            _ => $"{marker}."
+        };
+    }
+
+    private static string ResolveBulletGlyph(string style)
+    {
+        return style switch
+        {
+            "circle" => "o",
+            "square" => "■",
+            "diamond" => "◆",
+            "dash" => "-",
+            "arrow" => "➤",
+            "check" => "✓",
+            _ => "•"
+        };
     }
 
     private void ExecuteBatchOperation(string sessionId, string operation, JsonNode payload)
@@ -1676,5 +2068,6 @@ public class OfficeSessionService
         return $"{column}{rowIndex}";
     }
 
+    private sealed record ListNumberingDefinitions(int NumberedNumberingId, int BulletedNumberingId);
     private sealed record OperationLogEntry(DateTimeOffset TimestampUtc, string OperationName, string Message);
 }

@@ -26,6 +26,15 @@ internal static class OfficeBatchDispatcher
         {
             ["word_append_paragraph"] = static (svc, sessionId, payload) =>
                 svc.WordAppendParagraph(sessionId, payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'.")),
+            ["word_set_paragraph_style"] = static (svc, sessionId, payload) =>
+                svc.WordSetParagraphStyle(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? 1,
+                    payload["fontName"]?.GetValue<string>() ?? "Calibri",
+                    payload["fontSize"]?.GetValue<int>() ?? 18,
+                    payload["bold"]?.GetValue<bool>() ?? false,
+                    payload["italic"]?.GetValue<bool>() ?? false,
+                    payload["colorHex"]?.GetValue<string>() ?? "000000"),
             ["word_add_table"] = static (svc, sessionId, payload) =>
                 svc.WordAddTable(sessionId, payload["rows"]?.GetValue<int>() ?? 0, payload["columns"]?.GetValue<int>() ?? 0),
             ["word_insert_paragraph_at"] = static (svc, sessionId, payload) =>
@@ -35,9 +44,31 @@ internal static class OfficeBatchDispatcher
             ["word_add_heading"] = static (svc, sessionId, payload) =>
                 svc.WordAddHeading(sessionId, payload["level"]?.GetValue<int>() ?? 1, payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'.")),
             ["word_add_bulleted_list"] = static (svc, sessionId, payload) =>
-                svc.WordAddBulletedList(sessionId, payload["lines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'lines'.")),
+                svc.WordAddBulletedList(
+                    sessionId,
+                    payload["lines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'lines'."),
+                    payload["bulletStyle"]?.GetValue<string>() ?? "disc"),
+            ["word_add_numbered_list"] = static (svc, sessionId, payload) =>
+                svc.WordAddNumberedList(
+                    sessionId,
+                    payload["lines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'lines'."),
+                    payload["numberStyle"]?.GetValue<string>() ?? "decimal-dot"),
+            ["word_add_structured_list"] = static (svc, sessionId, payload) =>
+                svc.WordAddStructuredList(
+                    sessionId,
+                    payload["itemsJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'itemsJson'.")),
             ["excel_set_cell_value"] = static (svc, sessionId, payload) =>
                 svc.ExcelSetCellValue(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."), payload["value"]?.GetValue<string>() ?? string.Empty),
+            ["excel_set_cell_style"] = static (svc, sessionId, payload) =>
+                svc.ExcelSetCellStyle(
+                    sessionId,
+                    payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."),
+                    payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."),
+                    payload["fontName"]?.GetValue<string>() ?? "Calibri",
+                    payload["fontSize"]?.GetValue<int>() ?? 11,
+                    payload["bold"]?.GetValue<bool>() ?? false,
+                    payload["italic"]?.GetValue<bool>() ?? false,
+                    payload["colorHex"]?.GetValue<string>() ?? "000000"),
             ["excel_set_range_values"] = static (svc, sessionId, payload) =>
                 svc.ExcelSetRangeValues(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["startCell"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'startCell'."), payload["valuesJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'valuesJson'.")),
             ["excel_set_formula"] = static (svc, sessionId, payload) =>
@@ -46,6 +77,16 @@ internal static class OfficeBatchDispatcher
                 svc.ExcelAddWorksheet(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'.")),
             ["powerpoint_add_slide"] = static (svc, sessionId, payload) =>
                 svc.PowerPointAddSlide(sessionId, payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."), payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'.")),
+            ["powerpoint_set_text_style"] = static (svc, sessionId, payload) =>
+                svc.PowerPointSetTextStyle(
+                    sessionId,
+                    payload["slideIndex"]?.GetValue<int>() ?? 1,
+                    payload["slot"]?.GetValue<int>() ?? 0,
+                    payload["fontName"]?.GetValue<string>() ?? "Calibri",
+                    payload["fontSize"]?.GetValue<int>() ?? 24,
+                    payload["bold"]?.GetValue<bool>() ?? false,
+                    payload["italic"]?.GetValue<bool>() ?? false,
+                    payload["colorHex"]?.GetValue<string>() ?? "000000"),
             ["powerpoint_insert_slide_at"] = static (svc, sessionId, payload) =>
                 svc.PowerPointInsertSlideAt(sessionId, payload["index"]?.GetValue<int>() ?? 0, payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."), payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'.")),
             ["powerpoint_set_slide_title"] = static (svc, sessionId, payload) =>
@@ -59,7 +100,12 @@ internal static class OfficeBatchDispatcher
             ["powerpoint_add_bullet_slide"] = static (svc, sessionId, payload) =>
                 svc.PowerPointAddBulletSlide(sessionId, payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."), payload["bulletLines"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'bulletLines'.")),
             ["apply_style_preset"] = static (svc, sessionId, payload) =>
-                svc.ApplyStylePreset(sessionId, payload["preset"]?.GetValue<string>() ?? "default")
+                svc.ApplyStylePreset(sessionId, payload["preset"]?.GetValue<string>() ?? "default"),
+            ["apply_text_preset"] = static (svc, sessionId, payload) =>
+                svc.ApplyTextPreset(
+                    sessionId,
+                    payload["preset"]?.GetValue<string>() ?? "default",
+                    payload["targetIndex"]?.GetValue<int>() ?? 1)
         };
     }
 }

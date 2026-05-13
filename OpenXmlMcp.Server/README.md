@@ -28,10 +28,14 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 ## Phase 2 tools
 
 - `word_add_table(sessionId, rows, columns)` inserts a basic table in Word.
+- `word_set_paragraph_style(sessionId, paragraphIndex, fontName, fontSize, bold, italic, colorHex)` styles a Word paragraph.
 - `excel_add_worksheet(sessionId, sheetName)` adds a worksheet to Excel.
+- `excel_set_cell_style(sessionId, sheetName, cellReference, fontName, fontSize, bold, italic, colorHex)` styles an Excel cell.
 - `powerpoint_add_bullet_slide(sessionId, title, bulletLines)` adds a bullet-style slide.
+- `powerpoint_set_text_style(sessionId, slideIndex, slot, fontName, fontSize, bold, italic, colorHex)` styles a slide text slot.
 - `batch_execute(sessionId, operationsJson)` executes a JSON array of operations and returns per-operation results.
 - `apply_style_preset(sessionId, preset)` applies cross-suite style defaults (`default`, `neutral`).
+- `apply_text_preset(sessionId, preset, targetIndex)` applies text presets (`default`, `title`, `subtitle`).
 
 ## Universal operation contract (Phase 5 foundation)
 
@@ -55,6 +59,9 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 - `word_replace_text(sessionId, find, replace, matchCase)` replaces text and returns replacement count.
 - `word_add_heading(sessionId, level, text)` appends heading style paragraphs (levels 1-6).
 - `word_add_bulleted_list(sessionId, lines)` appends newline-separated bullet items.
+- `word_add_bulleted_list(sessionId, lines, bulletStyle)` appends bullet items (default style `disc` -> `•`).
+- `word_add_numbered_list(sessionId, lines, numberStyle)` appends numbered items (default `decimal-dot` -> `1.`).
+- `word_add_structured_list(sessionId, itemsJson)` appends nested mixed lists from JSON (`text`, `level`, `kind`).
 
 ## Phase 4 (Excel) tools
 
