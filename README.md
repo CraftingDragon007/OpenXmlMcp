@@ -63,8 +63,11 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 
 ## PowerPoint
 
-- Slides: `powerpoint_add_slide`, `powerpoint_add_bullet_slide`, `powerpoint_insert_slide_at`, `powerpoint_reorder_slide`, `powerpoint_delete_slide`
-- Text: `powerpoint_set_slide_title`, `powerpoint_set_slide_body`, `powerpoint_set_text_style`
+- Slides: `powerpoint_add_slide` (supports `bodyType`: `text`, `bulleted`, `numbered`), `powerpoint_add_bullet_slide` (compat wrapper), `powerpoint_insert_slide_at`, `powerpoint_reorder_slide`, `powerpoint_delete_slide`
+- Text: `powerpoint_set_slide_title`, `powerpoint_set_slide_body` (supports `bodyType`: `text`, `bulleted`, `numbered`), `powerpoint_set_text_style`
+- Notes: `powerpoint_set_slide_notes`, `powerpoint_get_slide_notes`
+
+`powerpoint_set_text_style` uses `slot=0` for title and `slot=1` for the entire body region (all body paragraphs, including bulleted/numbered lines).
 
 ## Cross-Suite Presets
 

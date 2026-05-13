@@ -125,7 +125,11 @@ internal static class OfficeBatchDispatcher
             ["excel_add_worksheet"] = static (svc, sessionId, payload) =>
                 svc.ExcelAddWorksheet(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'.")),
             ["powerpoint_add_slide"] = static (svc, sessionId, payload) =>
-                svc.PowerPointAddSlide(sessionId, payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."), payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'.")),
+                svc.PowerPointAddSlide(
+                    sessionId,
+                    payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'."),
+                    payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'."),
+                    payload["bodyType"]?.GetValue<string>() ?? "text"),
             ["powerpoint_set_text_style"] = static (svc, sessionId, payload) =>
                 svc.PowerPointSetTextStyle(
                     sessionId,
@@ -141,7 +145,15 @@ internal static class OfficeBatchDispatcher
             ["powerpoint_set_slide_title"] = static (svc, sessionId, payload) =>
                 svc.PowerPointSetSlideTitle(sessionId, payload["slideIndex"]?.GetValue<int>() ?? 0, payload["title"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'title'.")),
             ["powerpoint_set_slide_body"] = static (svc, sessionId, payload) =>
-                svc.PowerPointSetSlideBody(sessionId, payload["slideIndex"]?.GetValue<int>() ?? 0, payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'.")),
+                svc.PowerPointSetSlideBody(
+                    sessionId,
+                    payload["slideIndex"]?.GetValue<int>() ?? 0,
+                    payload["body"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'body'."),
+                    payload["bodyType"]?.GetValue<string>() ?? "text"),
+            ["powerpoint_set_slide_notes"] = static (svc, sessionId, payload) =>
+                svc.PowerPointSetSlideNotes(sessionId, payload["slideIndex"]?.GetValue<int>() ?? 0, payload["notes"]?.GetValue<string>() ?? string.Empty),
+            ["powerpoint_get_slide_notes"] = static (svc, sessionId, payload) =>
+                _ = svc.PowerPointGetSlideNotes(sessionId, payload["slideIndex"]?.GetValue<int>() ?? 0),
             ["powerpoint_reorder_slide"] = static (svc, sessionId, payload) =>
                 svc.PowerPointReorderSlide(sessionId, payload["fromIndex"]?.GetValue<int>() ?? 0, payload["toIndex"]?.GetValue<int>() ?? 0),
             ["powerpoint_delete_slide"] = static (svc, sessionId, payload) =>

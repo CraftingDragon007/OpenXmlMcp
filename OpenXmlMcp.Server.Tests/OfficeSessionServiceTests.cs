@@ -310,6 +310,60 @@ public class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void PowerPointBulletSlide_UsesRealBulletParagraphs()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddBulletSlide(sessionId, "Sprint", "Task A\nTask B");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var slidePart = presentation.PresentationPart!.SlideParts.First();
+            Assert.NotNull(slidePart.Slide);
+            var bulletParagraphs = slidePart.Slide!
+                .Descendants<DocumentFormat.OpenXml.Drawing.ParagraphProperties>()
+                .Count(p => p.Descendants<DocumentFormat.OpenXml.Drawing.CharacterBullet>().Any(b => b.Char?.Value == "•"));
+
+            Assert.True(bulletParagraphs >= 2);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointAddSlide_NumberedBody_UsesAutoNumberedParagraphs()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Plan", "Kickoff\nScope\nDelivery", "numbered");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var slidePart = presentation.PresentationPart!.SlideParts.First();
+            Assert.NotNull(slidePart.Slide);
+            var numberedParagraphs = slidePart.Slide!
+                .Descendants<DocumentFormat.OpenXml.Drawing.ParagraphProperties>()
+                .Count(p => p.Descendants<DocumentFormat.OpenXml.Drawing.AutoNumberedBullet>().Any());
+
+            Assert.True(numberedParagraphs >= 3);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void BatchExecute_MixedOperations_ReportsFailuresAndSuccesses()
     {
         var service = new OfficeSessionService();
@@ -715,6 +769,137 @@ public class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void PowerPointSetSlideBody_CanConvertTextToBulletedOrNumbered()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Old Title", "Single line");
+            service.PowerPointSetSlideBody(sessionId, 1, "One\nTwo", "bulleted");
+            service.PowerPointSetSlideBody(sessionId, 1, "First\nSecond", "numbered");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var slidePart = presentation.PresentationPart!.SlideParts.First();
+            Assert.NotNull(slidePart.Slide);
+            var autoNumbered = slidePart.Slide!
+                .Descendants<DocumentFormat.OpenXml.Drawing.ParagraphProperties>()
+                .Count(p => p.Descendants<DocumentFormat.OpenXml.Drawing.AutoNumberedBullet>().Any());
+
+            Assert.True(autoNumbered >= 2);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointSetTextStyle_BodySlotStylesAllBodyParagraphs()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Plan", "Kickoff\nScope\nDelivery", "bulleted");
+            service.PowerPointSetTextStyle(sessionId, 1, 1, "Aptos", 22, bold: false, italic: false, colorHex: "374151");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var slidePart = presentation.PresentationPart!.SlideParts.First();
+            Assert.NotNull(slidePart.Slide);
+
+            var bodySizes = slidePart.Slide!
+                .Descendants<DocumentFormat.OpenXml.Drawing.Paragraph>()
+                .Skip(1)
+                .Select(p => p.Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>().FirstOrDefault()?.FontSize?.Value)
+                .ToList();
+
+            Assert.True(bodySizes.Count >= 3);
+            Assert.All(bodySizes, size => Assert.Equal(2200, size));
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointStructure_BodyContainsAllListLines()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Plan", "Kickoff\nScope\nDelivery", "bulleted");
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("Kickoff", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Scope", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Delivery", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointSetAndGetSlideNotes_Works()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Topic", "Visible body");
+            service.PowerPointSetSlideNotes(sessionId, 1, "Hidden presenter note");
+
+            var notes = service.PowerPointGetSlideNotes(sessionId, 1);
+            Assert.Equal("Hidden presenter note", notes);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointStructure_IncludesNotesPreview()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Topic", "Visible body");
+            service.PowerPointSetSlideNotes(sessionId, 1, "Presenter-only guidance");
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"notesPreview\":\"Presenter-only guidance\"", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void PowerPointReorderAndDeleteSlide_Work()
     {
         var service = new OfficeSessionService();
@@ -763,6 +948,36 @@ public class OfficeSessionServiceTests
             Assert.NotNull(slideMasterPart.ThemePart);
             Assert.NotEmpty(slideMasterPart.SlideLayoutParts);
             Assert.Equal("Office", slideMasterPart.ThemePart!.Theme?.Name?.Value);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointAddSlide_UsesReadableDefaultFontSizes()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Title", "Body");
+            service.CloseDocument(sessionId);
+
+            using var presentation = PresentationDocument.Open(filePath, false);
+            var slidePart = presentation.PresentationPart!.SlideParts.First();
+            Assert.NotNull(slidePart.Slide);
+            var paragraphs = slidePart.Slide!.Descendants<DocumentFormat.OpenXml.Drawing.Paragraph>().ToList();
+            Assert.True(paragraphs.Count >= 2);
+
+            var titleRunProps = paragraphs[0].Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>().FirstOrDefault();
+            var bodyRunProps = paragraphs[1].Descendants<DocumentFormat.OpenXml.Drawing.RunProperties>().FirstOrDefault();
+
+            Assert.Equal(4400, titleRunProps?.FontSize?.Value);
+            Assert.Equal(2800, bodyRunProps?.FontSize?.Value);
         }
         finally
         {

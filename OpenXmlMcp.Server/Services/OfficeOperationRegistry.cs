@@ -62,6 +62,8 @@ internal static class OfficeOperationRegistry
             new("powerpoint_insert_slide_at", OfficeDocumentType.PowerPoint, true, "power_point_insert_slide_at"),
             new("powerpoint_set_slide_title", OfficeDocumentType.PowerPoint, true, "power_point_set_slide_title"),
             new("powerpoint_set_slide_body", OfficeDocumentType.PowerPoint, true, "power_point_set_slide_body"),
+            new("powerpoint_set_slide_notes", OfficeDocumentType.PowerPoint, true, "power_point_set_slide_notes"),
+            new("powerpoint_get_slide_notes", OfficeDocumentType.PowerPoint, false, "power_point_get_slide_notes"),
             new("powerpoint_reorder_slide", OfficeDocumentType.PowerPoint, true, "power_point_reorder_slide"),
             new("powerpoint_delete_slide", OfficeDocumentType.PowerPoint, true, "power_point_delete_slide"),
             new("powerpoint_add_bullet_slide", OfficeDocumentType.PowerPoint, true, "power_point_add_bullet_slide")

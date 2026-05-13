@@ -355,13 +355,14 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
-    [Description("Adds a simple title/body slide to a PPTX session.")]
+    [Description("Adds a slide to a PPTX session. bodyType can be text, bulleted, or numbered.")]
     public void PowerPointAddSlide(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("Slide title.")] string title,
-        [Description("Slide body text.")] string body)
+        [Description("Slide body text.")] string body,
+        [Description("Body type: text, bulleted, numbered.")] string bodyType = "text")
     {
-        officeSessionService.PowerPointAddSlide(sessionId, title, body);
+        officeSessionService.PowerPointAddSlide(sessionId, title, body, bodyType);
     }
 
     [McpServerTool]
@@ -386,17 +387,37 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
-    [Description("Sets the body text for a slide by 1-based index.")]
+    [Description("Sets the body content for a slide by 1-based index. bodyType can be text, bulleted, or numbered.")]
     public void PowerPointSetSlideBody(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex,
-        [Description("New body text.")] string body)
+        [Description("New body text.")] string body,
+        [Description("Body type: text, bulleted, numbered.")] string bodyType = "text")
     {
-        officeSessionService.PowerPointSetSlideBody(sessionId, slideIndex, body);
+        officeSessionService.PowerPointSetSlideBody(sessionId, slideIndex, body, bodyType);
     }
 
     [McpServerTool]
-    [Description("Applies font style to a text slot on a slide (slot 0=title, 1=body).")]
+    [Description("Sets hidden speaker notes for a slide by 1-based index.")]
+    public void PowerPointSetSlideNotes(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex,
+        [Description("Speaker notes text.")] string notes)
+    {
+        officeSessionService.PowerPointSetSlideNotes(sessionId, slideIndex, notes);
+    }
+
+    [McpServerTool]
+    [Description("Gets hidden speaker notes for a slide by 1-based index.")]
+    public string PowerPointGetSlideNotes(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex)
+    {
+        return officeSessionService.PowerPointGetSlideNotes(sessionId, slideIndex);
+    }
+
+    [McpServerTool]
+    [Description("Applies font style to a text slot on a slide (slot 0=title, 1=entire body across all body paragraphs).")]
     public void PowerPointSetTextStyle(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex,

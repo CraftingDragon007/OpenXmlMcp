@@ -15,6 +15,13 @@ namespace OpenXmlMcp.Server.Services;
 
 public class OfficeSessionService
 {
+    private enum PowerPointBodyType
+    {
+        Text,
+        Bulleted,
+        Numbered
+    }
+
     private const int DefaultParagraphBeforePt = 0;
     private const int DefaultParagraphAfterPt = 8;
     private const double DefaultParagraphLineSpacing = 1.15;
@@ -24,6 +31,10 @@ public class OfficeSessionService
     private const int DefaultListBeforePt = 0;
     private const int DefaultListAfterPt = 2;
     private const double DefaultListLineSpacing = 1.15;
+    private const int DefaultPptTitleFontSize = 4400;
+    private const int DefaultPptBodyFontSize = 2800;
+    private const string DefaultPptTitleFont = "Aptos Display";
+    private const string DefaultPptBodyFont = "Aptos";
     private readonly ConcurrentDictionary<string, OfficeSession> _sessions = new();
     private readonly ConcurrentDictionary<string, Stack<string>> _sessionSnapshots = new();
     private readonly ConcurrentDictionary<string, List<OperationLogEntry>> _sessionOperationLog = new();
@@ -483,9 +494,7 @@ public class OfficeSessionService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(bulletLines);
-        var body = string.Join(Environment.NewLine, bulletLines.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(line => $"- {line}"));
-        var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
-        ExecuteWriteOperation(session, "powerpoint_add_bullet_slide", () => PowerPointAddSlideCore(session.FilePath, title, body));
+        PowerPointAddSlide(sessionId, title, bulletLines, "bulleted");
     }
 
     public string BatchExecute(string sessionId, string operationsJson)
@@ -1262,13 +1271,14 @@ public class OfficeSessionService
         return cell?.CellFormula?.Text ?? string.Empty;
     }
 
-    public void PowerPointAddSlide(string sessionId, string title, string body)
+    public void PowerPointAddSlide(string sessionId, string title, string body, string bodyType = "text")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
+        var parsedBodyType = ParsePowerPointBodyType(bodyType);
         var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
 
-        ExecuteWriteOperation(session, "powerpoint_add_slide", () => PowerPointAddSlideCore(session.FilePath, title, body));
+        ExecuteWriteOperation(session, "powerpoint_add_slide", () => PowerPointAddSlideCore(session.FilePath, title, body, parsedBodyType));
     }
 
     public void PowerPointInsertSlideAt(string sessionId, int index, string title, string body)
@@ -1290,7 +1300,7 @@ public class OfficeSessionService
             }
 
             var newSlidePart = presentationPart.AddNewPart<SlidePart>();
-            newSlidePart.Slide = BuildSimpleSlide(title, body);
+            newSlidePart.Slide = BuildSlide(title, body, PowerPointBodyType.Text);
             var relationId = presentationPart.GetIdOfPart(newSlidePart);
             var newSlideIdValue = GetNextSlideId(slideIdList);
             var newSlideId = new SlideId { Id = newSlideIdValue, RelationshipId = relationId };
@@ -1322,15 +1332,16 @@ public class OfficeSessionService
         });
     }
 
-    public void PowerPointSetSlideBody(string sessionId, int slideIndex, string body)
+    public void PowerPointSetSlideBody(string sessionId, int slideIndex, string body, string bodyType = "text")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
+        var parsedBodyType = ParsePowerPointBodyType(bodyType);
         var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
         ExecuteWriteOperation(session, "powerpoint_set_slide_body", () =>
         {
             using var presentation = PresentationDocument.Open(session.FilePath, true);
             var slidePart = GetSlidePartByIndex(GetPresentationPart(presentation), slideIndex);
-            SetSlideTextBySlot(slidePart, 1, body);
+            SetSlideBodyByType(slidePart, 1, body, parsedBodyType);
             GetSlide(slidePart).Save();
         });
     }
@@ -1394,7 +1405,33 @@ public class OfficeSessionService
         });
     }
 
-    private static void PowerPointAddSlideCore(string filePath, string title, string body)
+    public void PowerPointSetSlideNotes(string sessionId, int slideIndex, string notes)
+    {
+        var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
+        ExecuteWriteOperation(session, "powerpoint_set_slide_notes", () =>
+        {
+            using var presentation = PresentationDocument.Open(session.FilePath, true);
+            var slidePart = GetSlidePartByIndex(GetPresentationPart(presentation), slideIndex);
+            var notesSlidePart = EnsureNotesSlidePart(slidePart);
+            SetNotesSlideText(notesSlidePart, notes ?? string.Empty);
+            notesSlidePart.NotesSlide?.Save();
+        });
+    }
+
+    public string PowerPointGetSlideNotes(string sessionId, int slideIndex)
+    {
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.PowerPoint)
+        {
+            throw new InvalidOperationException("Session document type is not PowerPoint.");
+        }
+
+        using var presentation = PresentationDocument.Open(session.FilePath, false);
+        var slidePart = GetSlidePartByIndex(GetPresentationPart(presentation), slideIndex);
+        return GetNotesSlideText(slidePart.NotesSlidePart);
+    }
+
+    private static void PowerPointAddSlideCore(string filePath, string title, string body, PowerPointBodyType bodyType)
     {
         using var presentation = PresentationDocument.Open(filePath, true);
         var presentationPart = presentation.PresentationPart ?? throw new InvalidOperationException("Presentation part is missing.");
@@ -1404,7 +1441,7 @@ public class OfficeSessionService
 
         var newSlidePart = presentationPart.AddNewPart<SlidePart>();
         _ = newSlidePart.AddPart(slideLayoutPart);
-        newSlidePart.Slide = BuildSimpleSlide(title, body);
+        newSlidePart.Slide = BuildSlide(title, body, bodyType);
 
         var maxSlideId = slideIdList.Elements<SlideId>().Select(x => x.Id?.Value ?? 255U).DefaultIfEmpty(255U).Max();
         var relationId = presentationPart.GetIdOfPart(newSlidePart);
@@ -1466,7 +1503,7 @@ public class OfficeSessionService
                 Id = 256U,
                 RelationshipId = slideMasterPart.GetIdOfPart(slideLayoutPart)
             }),
-            new TextStyles(new TitleStyle(), new BodyStyle(), new OtherStyle()));
+            BuildDefaultPresentationTextStyles());
 
         WriteDefaultTheme(themePart, ResolveThemeOptions("default"));
         _ = presentationPart.AddPart(themePart);
@@ -1631,12 +1668,32 @@ public class OfficeSessionService
                 Accent6: "F79646",
                 Hyperlink: "0000FF",
                 FollowedHyperlink: "800080",
-                MajorLatinFont: "Arial",
-                MinorLatinFont: "Arial")
+                MajorLatinFont: "Aptos Display",
+                MinorLatinFont: "Aptos")
         };
     }
 
-    private static Slide BuildSimpleSlide(string title, string body)
+    private static TextStyles BuildDefaultPresentationTextStyles()
+    {
+        var titleStyle = new TitleStyle();
+        titleStyle.Append(new A.Level1ParagraphProperties(new A.DefaultRunProperties { FontSize = DefaultPptTitleFontSize, Language = "en-US" }));
+        titleStyle.Append(new A.Level2ParagraphProperties(new A.DefaultRunProperties { FontSize = 3600, Language = "en-US" }));
+        titleStyle.Append(new A.Level3ParagraphProperties(new A.DefaultRunProperties { FontSize = 3200, Language = "en-US" }));
+
+        var bodyStyle = new BodyStyle();
+        bodyStyle.Append(new A.Level1ParagraphProperties(new A.DefaultRunProperties { FontSize = DefaultPptBodyFontSize, Language = "en-US" }));
+        bodyStyle.Append(new A.Level2ParagraphProperties(new A.DefaultRunProperties { FontSize = 2400, Language = "en-US" }));
+        bodyStyle.Append(new A.Level3ParagraphProperties(new A.DefaultRunProperties { FontSize = 2000, Language = "en-US" }));
+
+        var otherStyle = new OtherStyle();
+        otherStyle.Append(new A.Level1ParagraphProperties(new A.DefaultRunProperties { FontSize = 1800, Language = "en-US" }));
+        otherStyle.Append(new A.Level2ParagraphProperties(new A.DefaultRunProperties { FontSize = 1800, Language = "en-US" }));
+        otherStyle.Append(new A.Level3ParagraphProperties(new A.DefaultRunProperties { FontSize = 1800, Language = "en-US" }));
+
+        return new TextStyles(titleStyle, bodyStyle, otherStyle);
+    }
+
+    private static Slide BuildSlide(string title, string body, PowerPointBodyType bodyType)
     {
         var shapeTree = new ShapeTree(
             new NonVisualGroupShapeProperties(
@@ -1645,14 +1702,19 @@ public class OfficeSessionService
                 new ApplicationNonVisualDrawingProperties()),
             new GroupShapeProperties(new A.TransformGroup()));
 
-        shapeTree.Append(CreateTextShape(2U, "Title", title, 457200L));
-        shapeTree.Append(CreateTextShape(3U, "Body", body, 1828800L));
+        shapeTree.Append(CreateTextShape(2U, "Title", title, 457200L, isTitle: true));
+        shapeTree.Append(CreateBodyShape(3U, "Body", body, 1828800L, bodyType));
 
         return new Slide(new CommonSlideData(shapeTree), new ColorMapOverride(new A.MasterColorMapping()));
     }
 
-    private static Shape CreateTextShape(uint id, string name, string text, long yOffset)
+    private static Shape CreateTextShape(uint id, string name, string text, long yOffset, bool isTitle)
     {
+        var fontSize = isTitle ? DefaultPptTitleFontSize : DefaultPptBodyFontSize;
+        var fontName = isTitle ? DefaultPptTitleFont : DefaultPptBodyFont;
+        var run = new A.Run(new A.Text(text));
+        run.PrependChild(CreateDrawingRunProperties(fontSize, fontName));
+
         return new Shape(
             new NonVisualShapeProperties(
                 new NonVisualDrawingProperties { Id = id, Name = name },
@@ -1665,7 +1727,110 @@ public class OfficeSessionService
             new TextBody(
                 new A.BodyProperties(),
                 new A.ListStyle(),
-                new A.Paragraph(new A.Run(new A.Text(text)), new A.EndParagraphRunProperties())));
+                new A.Paragraph(
+                    run,
+                    CreateDrawingEndParagraphRunProperties(fontSize, fontName))));
+    }
+
+    private static Shape CreateBodyShape(uint id, string name, string text, long yOffset, PowerPointBodyType bodyType)
+    {
+        var textBody = new TextBody(
+            new A.BodyProperties(),
+            new A.ListStyle());
+
+        foreach (var paragraph in BuildBodyParagraphs(text, bodyType))
+        {
+            textBody.Append(paragraph);
+        }
+
+        return new Shape(
+            new NonVisualShapeProperties(
+                new NonVisualDrawingProperties { Id = id, Name = name },
+                new NonVisualShapeDrawingProperties(new A.ShapeLocks { NoGrouping = true }),
+                new ApplicationNonVisualDrawingProperties()),
+            new ShapeProperties(
+                new A.Transform2D(
+                    new A.Offset { X = 457200L, Y = yOffset },
+                    new A.Extents { Cx = 8229600L, Cy = 3600000L })),
+            textBody);
+    }
+
+    private static List<A.Paragraph> BuildBodyParagraphs(string text, PowerPointBodyType bodyType)
+    {
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var paragraphs = new List<A.Paragraph>();
+
+        if (bodyType == PowerPointBodyType.Text)
+        {
+            var run = new A.Run(new A.Text(text));
+            run.PrependChild(CreateDrawingRunProperties(DefaultPptBodyFontSize, DefaultPptBodyFont));
+            paragraphs.Add(new A.Paragraph(run, CreateDrawingEndParagraphRunProperties(DefaultPptBodyFontSize, DefaultPptBodyFont)));
+            return paragraphs;
+        }
+
+        foreach (var line in lines)
+        {
+            var run = new A.Run(new A.Text(line));
+            run.PrependChild(CreateDrawingRunProperties(DefaultPptBodyFontSize, DefaultPptBodyFont));
+
+            var bulletElement = bodyType == PowerPointBodyType.Numbered
+                ? (OpenXmlElement)new A.AutoNumberedBullet { Type = A.TextAutoNumberSchemeValues.ArabicPeriod, StartAt = 1 }
+                : new A.CharacterBullet { Char = "•" };
+
+            var paragraph = new A.Paragraph();
+            paragraph.Append(new A.ParagraphProperties(
+                bulletElement,
+                new A.DefaultRunProperties { FontSize = DefaultPptBodyFontSize, Language = "en-US" })
+            {
+                Level = 0,
+                LeftMargin = 342900,
+                Indent = -171450
+            });
+            paragraph.Append(run);
+            paragraph.Append(CreateDrawingEndParagraphRunProperties(DefaultPptBodyFontSize, DefaultPptBodyFont));
+            paragraphs.Add(paragraph);
+        }
+
+        if (paragraphs.Count == 0)
+        {
+            paragraphs.Add(new A.Paragraph(CreateDrawingEndParagraphRunProperties(DefaultPptBodyFontSize, DefaultPptBodyFont)));
+        }
+
+        return paragraphs;
+    }
+
+    private static PowerPointBodyType ParsePowerPointBodyType(string bodyType)
+    {
+        var normalized = string.IsNullOrWhiteSpace(bodyType) ? "text" : bodyType.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "text" => PowerPointBodyType.Text,
+            "bulleted" => PowerPointBodyType.Bulleted,
+            "numbered" => PowerPointBodyType.Numbered,
+            _ => throw new InvalidOperationException("Invalid bodyType. Allowed values: text, bulleted, numbered.")
+        };
+    }
+
+    private static A.RunProperties CreateDrawingRunProperties(int fontSize, string fontName)
+    {
+        var properties = new A.RunProperties
+        {
+            FontSize = fontSize,
+            Language = "en-US"
+        };
+        properties.Append(new A.LatinFont { Typeface = fontName });
+        return properties;
+    }
+
+    private static A.EndParagraphRunProperties CreateDrawingEndParagraphRunProperties(int fontSize, string fontName)
+    {
+        var properties = new A.EndParagraphRunProperties
+        {
+            FontSize = fontSize,
+            Language = "en-US"
+        };
+        properties.Append(new A.LatinFont { Typeface = fontName });
+        return properties;
     }
 
     private static SlideIdList GetOrCreateSlideIdList(PresentationPart presentationPart)
@@ -1690,6 +1855,82 @@ public class OfficeSessionService
         return GetSlidePart(presentationPart, slideIds[slideIndex - 1]);
     }
 
+    private static NotesSlidePart EnsureNotesSlidePart(SlidePart slidePart)
+    {
+        if (slidePart.NotesSlidePart is not null)
+        {
+            slidePart.NotesSlidePart.NotesSlide ??= BuildDefaultNotesSlide();
+            return slidePart.NotesSlidePart;
+        }
+
+        var notesSlidePart = slidePart.AddNewPart<NotesSlidePart>();
+        notesSlidePart.NotesSlide = BuildDefaultNotesSlide();
+        return notesSlidePart;
+    }
+
+    private static NotesSlide BuildDefaultNotesSlide()
+    {
+        var shapeTree = new ShapeTree(
+            new NonVisualGroupShapeProperties(
+                new NonVisualDrawingProperties { Id = 1U, Name = string.Empty },
+                new NonVisualGroupShapeDrawingProperties(),
+                new ApplicationNonVisualDrawingProperties()),
+            new GroupShapeProperties(new A.TransformGroup()));
+
+        shapeTree.Append(new P.Shape(
+            new NonVisualShapeProperties(
+                new NonVisualDrawingProperties { Id = 2U, Name = "Notes Placeholder" },
+                new NonVisualShapeDrawingProperties(new A.ShapeLocks { NoGrouping = true }),
+                new ApplicationNonVisualDrawingProperties(new PlaceholderShape { Type = PlaceholderValues.Body, Index = 1U })),
+            new ShapeProperties(
+                new A.Transform2D(
+                    new A.Offset { X = 457200L, Y = 914400L },
+                    new A.Extents { Cx = 8229600L, Cy = 4572000L }),
+                new A.PresetGeometry(new A.AdjustValueList()) { Preset = A.ShapeTypeValues.Rectangle }),
+            new TextBody(
+                new A.BodyProperties(),
+                new A.ListStyle(),
+                new A.Paragraph(new A.EndParagraphRunProperties()))));
+
+        return new NotesSlide(new CommonSlideData(shapeTree), new ColorMapOverride(new A.MasterColorMapping()));
+    }
+
+    private static void SetNotesSlideText(NotesSlidePart notesSlidePart, string text)
+    {
+        var paragraph = notesSlidePart.NotesSlide?
+            .Descendants<P.Shape>()
+            .Select(shape => shape.TextBody)
+            .Where(body => body is not null)
+            .SelectMany(body => body!.Elements<A.Paragraph>())
+            .FirstOrDefault();
+
+        if (paragraph is null)
+        {
+            throw new InvalidOperationException("Notes slide does not contain editable text placeholders.");
+        }
+
+        paragraph.RemoveAllChildren<A.Run>();
+        paragraph.RemoveAllChildren<A.Break>();
+        paragraph.RemoveAllChildren<A.Field>();
+        paragraph.Append(new A.Run(new A.Text(text)));
+    }
+
+    private static string GetNotesSlideText(NotesSlidePart? notesSlidePart)
+    {
+        if (notesSlidePart?.NotesSlide is null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join("\n", notesSlidePart.NotesSlide
+            .Descendants<P.Shape>()
+            .Select(shape => shape.TextBody)
+            .Where(body => body is not null)
+            .SelectMany(body => body!.Elements<A.Paragraph>())
+            .Select(p => p.InnerText)
+            .Where(t => !string.IsNullOrWhiteSpace(t)));
+    }
+
     private static void SetSlideTextBySlot(SlidePart slidePart, int slot, string text)
     {
         var paragraphs = GetSlide(slidePart)
@@ -1712,6 +1953,29 @@ public class OfficeSessionService
         paragraph.Append(new A.Run(new A.Text(text)));
     }
 
+    private static void SetSlideBodyByType(SlidePart slidePart, int slot, string body, PowerPointBodyType bodyType)
+    {
+        var textBodies = GetSlide(slidePart)
+            .Descendants<P.Shape>()
+            .Select(shape => shape.TextBody)
+            .Where(textBody => textBody is not null)
+            .ToList();
+
+        if (textBodies.Count == 0)
+        {
+            throw new InvalidOperationException("Slide does not contain editable text placeholders.");
+        }
+
+        var targetIndex = Math.Clamp(slot, 0, textBodies.Count - 1);
+        var textBody = textBodies[targetIndex]!;
+        textBody.RemoveAllChildren<A.Paragraph>();
+
+        foreach (var paragraph in BuildBodyParagraphs(body, bodyType))
+        {
+            textBody.Append(paragraph);
+        }
+    }
+
     private static void ApplyPowerPointSlotStyle(SlidePart slidePart, int slot, TextStyle style)
     {
         var paragraphs = GetSlide(slidePart)
@@ -1726,8 +1990,36 @@ public class OfficeSessionService
             throw new InvalidOperationException("Slide does not contain editable text placeholders.");
         }
 
+        if (slot <= 0)
+        {
+            ApplyPowerPointParagraphStyle(paragraphs[0], style);
+            return;
+        }
+
+        var bodyParagraphs = paragraphs.Skip(1).ToList();
+        if (bodyParagraphs.Count == 0)
+        {
+            ApplyPowerPointParagraphStyle(paragraphs[0], style);
+            return;
+        }
+
+        if (slot == 1)
+        {
+            foreach (var paragraph in bodyParagraphs)
+            {
+                ApplyPowerPointParagraphStyle(paragraph, style);
+            }
+
+            return;
+        }
+
         var targetIndex = Math.Clamp(slot, 0, paragraphs.Count - 1);
-        var paragraph = paragraphs[targetIndex];
+        var targetParagraph = paragraphs[targetIndex];
+        ApplyPowerPointParagraphStyle(targetParagraph, style);
+    }
+
+    private static void ApplyPowerPointParagraphStyle(A.Paragraph paragraph, TextStyle style)
+    {
         foreach (var run in paragraph.Elements<A.Run>())
         {
             run.RunProperties ??= new A.RunProperties();
@@ -2055,7 +2347,8 @@ public class OfficeSessionService
             {
                 slideIndex = index,
                 title = paragraphs.ElementAtOrDefault(0) ?? string.Empty,
-                body = paragraphs.ElementAtOrDefault(1) ?? string.Empty,
+                body = string.Join("\n", paragraphs.Skip(1)),
+                notesPreview = TrimPreview(GetNotesSlideText(slidePart.NotesSlidePart)),
                 textSlots = paragraphs
                     .Select((text, slot) => new { slot, text, preview = TrimPreview(text) })
                     .ToArray()
