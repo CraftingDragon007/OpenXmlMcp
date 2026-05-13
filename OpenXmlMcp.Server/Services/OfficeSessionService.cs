@@ -243,6 +243,54 @@ public class OfficeSessionService
         });
     }
 
+    public void WordSetTableCell(string sessionId, int tableIndex, int rowIndex, int columnIndex, string text)
+    {
+        if (tableIndex < 1 || rowIndex < 1 || columnIndex < 1)
+        {
+            throw new InvalidOperationException("tableIndex, rowIndex, and columnIndex must be >= 1.");
+        }
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_set_table_cell", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var row = table.Elements<W.TableRow>().ElementAtOrDefault(rowIndex - 1)
+                ?? throw new InvalidOperationException($"Row index {rowIndex} is out of range for table {tableIndex}.");
+            var cell = row.Elements<W.TableCell>().ElementAtOrDefault(columnIndex - 1)
+                ?? throw new InvalidOperationException($"Column index {columnIndex} is out of range for table {tableIndex}, row {rowIndex}.");
+
+            cell.RemoveAllChildren<W.Paragraph>();
+            cell.Append(new W.Paragraph(new W.Run(new W.Text(text ?? string.Empty))));
+            document.MainDocumentPart.Document?.Save();
+        });
+    }
+
+    public string WordGetTableCell(string sessionId, int tableIndex, int rowIndex, int columnIndex)
+    {
+        if (tableIndex < 1 || rowIndex < 1 || columnIndex < 1)
+        {
+            throw new InvalidOperationException("tableIndex, rowIndex, and columnIndex must be >= 1.");
+        }
+
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.Word)
+        {
+            throw new InvalidOperationException("Session document type is not Word.");
+        }
+
+        using var document = WordprocessingDocument.Open(session.FilePath, false);
+        var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+        var table = GetWordTableByIndex(body, tableIndex);
+        var row = table.Elements<W.TableRow>().ElementAtOrDefault(rowIndex - 1)
+            ?? throw new InvalidOperationException($"Row index {rowIndex} is out of range for table {tableIndex}.");
+        var cell = row.Elements<W.TableCell>().ElementAtOrDefault(columnIndex - 1)
+            ?? throw new InvalidOperationException($"Column index {columnIndex} is out of range for table {tableIndex}, row {rowIndex}.");
+
+        return string.Join("\n", cell.Elements<W.Paragraph>().Select(p => p.InnerText));
+    }
+
     public void WordInsertParagraphAt(string sessionId, int index, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
@@ -619,7 +667,7 @@ public class OfficeSessionService
             var paragraphs = body.Elements<W.Paragraph>().ToList();
             if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
             {
-                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count}.");
+                throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
             }
 
             ApplyWordParagraphSpacing(paragraphs[paragraphIndex - 1], beforePt, afterPt, lineSpacing);
@@ -775,7 +823,7 @@ public class OfficeSessionService
             var paragraphs = body.Elements<W.Paragraph>().ToList();
             if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
             {
-                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count}.");
+                throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
             }
 
             var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
@@ -851,7 +899,7 @@ public class OfficeSessionService
 
             if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
             {
-                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count}.");
+                throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
             }
 
             ApplyWordParagraphStyle(paragraphs[paragraphIndex - 1], style);
@@ -1093,7 +1141,16 @@ public class OfficeSessionService
 
         ExecuteWriteOperation(session, "excel_set_range_values", () =>
         {
-            var matrixNode = JsonNode.Parse(valuesJson) ?? throw new InvalidOperationException("Invalid valuesJson.");
+            JsonNode matrixNode;
+            try
+            {
+                matrixNode = JsonNode.Parse(valuesJson) ?? throw new InvalidOperationException("Invalid valuesJson.");
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException("Invalid valuesJson. Provide strict JSON with double-quoted strings, e.g. [[\"A\",\"B\"],[\"C\",\"D\"]].", ex);
+            }
+
             var rows = matrixNode.AsArray();
             if (rows.Count == 0)
             {
@@ -1122,7 +1179,7 @@ public class OfficeSessionService
 
                 for (var c = 0; c < rowValues.Count; c++)
                 {
-                    var value = rowValues[c]?.ToString() ?? string.Empty;
+                    var node = rowValues[c];
                     var columnIndex = start.Column + c;
                     var cellRef = BuildCellReference(columnIndex, rowIndex);
 
@@ -1133,9 +1190,7 @@ public class OfficeSessionService
                         row.Append(cell);
                     }
 
-                    cell.CellFormula = null;
-                    cell.DataType = CellValues.String;
-                    cell.CellValue = new CellValue(value);
+                    ApplyExcelNodeValue(cell, node);
                 }
             }
 
@@ -1918,9 +1973,55 @@ public class OfficeSessionService
     {
         using var document = WordprocessingDocument.Open(filePath, false);
         var body = document.MainDocumentPart?.Document?.Body;
-        var paragraphCount = body?.Descendants<Paragraph>().Count() ?? 0;
-        var tableCount = body?.Descendants<W.Table>().Count() ?? 0;
-        return new { paragraphCount, tableCount };
+        if (body is null)
+        {
+            return new { paragraphCount = 0, bodyParagraphCount = 0, tableCount = 0, elements = Array.Empty<object>(), tables = Array.Empty<object>() };
+        }
+
+        var paragraphs = GetWordParagraphReferences(body);
+        var tableSummaries = BuildWordTableSummaries(body).ToArray();
+        var elements = new List<object>();
+
+        foreach (var element in body.Elements())
+        {
+            if (element is W.Paragraph paragraph)
+            {
+                var reference = paragraphs.FirstOrDefault(x => ReferenceEquals(x.Paragraph, paragraph));
+                var headingLevel = GetHeadingLevel(paragraph);
+                elements.Add(new
+                {
+                    type = headingLevel.HasValue ? "heading" : "paragraph",
+                    bodyParagraphIndex = reference?.BodyParagraphIndex,
+                    allParagraphIndex = reference?.AllParagraphIndex,
+                    headingLevel,
+                    text = paragraph.InnerText,
+                    preview = TrimPreview(paragraph.InnerText)
+                });
+            }
+            else if (element is W.Table table)
+            {
+                var tableIndex = body.Elements<W.Table>().TakeWhile(t => !ReferenceEquals(t, table)).Count() + 1;
+                var rows = table.Elements<W.TableRow>().Count();
+                var columns = table.Elements<W.TableRow>().FirstOrDefault()?.Elements<W.TableCell>().Count() ?? 0;
+                elements.Add(new
+                {
+                    type = "table",
+                    tableIndex,
+                    rows,
+                    columns,
+                    preview = TrimPreview(string.Join(" ", table.Descendants<W.Paragraph>().Select(p => p.InnerText).Where(t => !string.IsNullOrWhiteSpace(t))))
+                });
+            }
+        }
+
+        return new
+        {
+            paragraphCount = paragraphs.Count,
+            bodyParagraphCount = paragraphs.Count(x => x.BodyParagraphIndex.HasValue),
+            tableCount = tableSummaries.Length,
+            elements,
+            tables = tableSummaries
+        };
     }
 
     private static object ListExcelStructure(string filePath)
@@ -1934,20 +2035,254 @@ public class OfficeSessionService
     private static object ListPowerPointStructure(string filePath)
     {
         using var presentation = PresentationDocument.Open(filePath, false);
-        var slideCount = GetSlideIds(GetPresentationPart(presentation)).Count();
-        return new { slideCount };
+        var presentationPart = GetPresentationPart(presentation);
+        var slides = new List<object>();
+        var index = 0;
+        foreach (var slideId in GetSlideIds(presentationPart))
+        {
+            index++;
+            var slidePart = GetSlidePart(presentationPart, slideId);
+            var paragraphs = GetSlide(slidePart)
+                .Descendants<P.Shape>()
+                .Select(shape => shape.TextBody)
+                .Where(textBody => textBody is not null)
+                .SelectMany(textBody => textBody!.Elements<A.Paragraph>())
+                .Select(p => p.InnerText)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+
+            slides.Add(new
+            {
+                slideIndex = index,
+                title = paragraphs.ElementAtOrDefault(0) ?? string.Empty,
+                body = paragraphs.ElementAtOrDefault(1) ?? string.Empty,
+                textSlots = paragraphs
+                    .Select((text, slot) => new { slot, text, preview = TrimPreview(text) })
+                    .ToArray()
+            });
+        }
+
+        return new { slideCount = slides.Count, slides };
     }
 
     private static object FindTextInWord(string filePath, string query)
     {
         using var document = WordprocessingDocument.Open(filePath, false);
-        var paragraphs = document.MainDocumentPart?.Document?.Body?.Descendants<Paragraph>() ?? [];
-        var matches = paragraphs
-            .Select((p, index) => new { index = index + 1, text = p.InnerText })
-            .Where(x => x.text.Contains(query, StringComparison.OrdinalIgnoreCase))
+        var body = document.MainDocumentPart?.Document?.Body;
+        if (body is null)
+        {
+            return new { matchCount = 0, matches = Array.Empty<object>() };
+        }
+
+        var references = GetWordParagraphReferences(body);
+        var matches = references
+            .Where(x => x.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Select(x => new
+            {
+                index = x.AllParagraphIndex,
+                bodyParagraphIndex = x.BodyParagraphIndex,
+                inTable = x.InTable,
+                tableIndex = x.TableIndex,
+                rowIndex = x.RowIndex,
+                columnIndex = x.ColumnIndex,
+                addressableByParagraphTools = x.BodyParagraphIndex.HasValue,
+                text = x.Text
+            })
             .ToArray();
         return new { matchCount = matches.Length, matches };
     }
+
+    private static void ApplyExcelNodeValue(Cell cell, JsonNode? node)
+    {
+        if (node is null)
+        {
+            cell.CellFormula = null;
+            cell.DataType = CellValues.String;
+            cell.CellValue = new CellValue(string.Empty);
+            return;
+        }
+
+        if (node is JsonValue valueNode)
+        {
+            if (valueNode.TryGetValue<string>(out var stringValue))
+            {
+                if (!string.IsNullOrEmpty(stringValue) && stringValue.StartsWith("=", StringComparison.Ordinal))
+                {
+                    cell.CellFormula = new CellFormula(stringValue[1..]);
+                    cell.CellValue = null;
+                    cell.DataType = null;
+                    return;
+                }
+
+                cell.CellFormula = null;
+                cell.DataType = CellValues.String;
+                cell.CellValue = new CellValue(stringValue);
+                return;
+            }
+
+            if (valueNode.TryGetValue<double>(out var numberValue))
+            {
+                cell.CellFormula = null;
+                cell.DataType = CellValues.Number;
+                cell.CellValue = new CellValue(numberValue.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                return;
+            }
+
+            if (valueNode.TryGetValue<bool>(out var boolValue))
+            {
+                cell.CellFormula = null;
+                cell.DataType = CellValues.Boolean;
+                cell.CellValue = new CellValue(boolValue ? "1" : "0");
+                return;
+            }
+        }
+
+        cell.CellFormula = null;
+        cell.DataType = CellValues.String;
+        cell.CellValue = new CellValue(node.ToJsonString());
+    }
+
+    private static string BuildWordBodyParagraphRangeMessage(W.Body body, int requestedIndex, int bodyParagraphCount)
+    {
+        var allParagraphCount = body.Descendants<W.Paragraph>().Count();
+        var tableParagraphs = allParagraphCount - bodyParagraphCount;
+        return $"Paragraph index {requestedIndex} is out of range. Valid range is 1..{bodyParagraphCount} for body-level paragraphs. This document also contains {tableParagraphs} table-cell paragraphs that are not addressable by paragraph index tools.";
+    }
+
+    private static W.Table GetWordTableByIndex(W.Body body, int tableIndex)
+    {
+        var tables = body.Elements<W.Table>().ToList();
+        if (tableIndex > tables.Count)
+        {
+            throw new InvalidOperationException($"Table index {tableIndex} is out of range. Valid range is 1..{tables.Count}.");
+        }
+
+        return tables[tableIndex - 1];
+    }
+
+    private static List<object> BuildWordTableSummaries(W.Body body)
+    {
+        var tables = body.Elements<W.Table>().ToList();
+        var summaries = new List<object>(tables.Count);
+        for (var i = 0; i < tables.Count; i++)
+        {
+            var table = tables[i];
+            var rows = table.Elements<W.TableRow>().ToList();
+            var columns = rows.FirstOrDefault()?.Elements<W.TableCell>().Count() ?? 0;
+            var cells = rows
+                .SelectMany((row, rowIndex) => row.Elements<W.TableCell>().Select((cell, colIndex) => new
+                {
+                    rowIndex = rowIndex + 1,
+                    columnIndex = colIndex + 1,
+                    text = string.Join("\n", cell.Elements<W.Paragraph>().Select(p => p.InnerText)),
+                    preview = TrimPreview(string.Join(" ", cell.Elements<W.Paragraph>().Select(p => p.InnerText)))
+                }))
+                .ToArray();
+
+            summaries.Add(new
+            {
+                tableIndex = i + 1,
+                rowCount = rows.Count,
+                columnCount = columns,
+                cells
+            });
+        }
+
+        return summaries;
+    }
+
+    private static List<WordParagraphReference> GetWordParagraphReferences(W.Body body)
+    {
+        var tables = body.Elements<W.Table>().ToList();
+        var references = new List<WordParagraphReference>();
+        var allIndex = 0;
+        var bodyIndex = 0;
+
+        foreach (var paragraph in body.Descendants<W.Paragraph>())
+        {
+            allIndex++;
+            int? bodyParagraphIndex = null;
+            if (ReferenceEquals(paragraph.Parent, body))
+            {
+                bodyIndex++;
+                bodyParagraphIndex = bodyIndex;
+            }
+
+            var table = paragraph.Ancestors<W.Table>().FirstOrDefault();
+            int? tableIndex = null;
+            int? rowIndex = null;
+            int? columnIndex = null;
+
+            if (table is not null)
+            {
+                tableIndex = tables.FindIndex(t => ReferenceEquals(t, table)) + 1;
+                var row = paragraph.Ancestors<W.TableRow>().FirstOrDefault();
+                var cell = paragraph.Ancestors<W.TableCell>().FirstOrDefault();
+                if (row is not null)
+                {
+                    rowIndex = table.Elements<W.TableRow>().TakeWhile(r => !ReferenceEquals(r, row)).Count() + 1;
+                }
+
+                if (cell is not null && row is not null)
+                {
+                    columnIndex = row.Elements<W.TableCell>().TakeWhile(c => !ReferenceEquals(c, cell)).Count() + 1;
+                }
+            }
+
+            references.Add(new WordParagraphReference(
+                paragraph,
+                paragraph.InnerText,
+                allIndex,
+                bodyParagraphIndex,
+                table is not null,
+                tableIndex,
+                rowIndex,
+                columnIndex));
+        }
+
+        return references;
+    }
+
+    private static int? GetHeadingLevel(W.Paragraph paragraph)
+    {
+        var styleId = paragraph.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (string.IsNullOrWhiteSpace(styleId))
+        {
+            return null;
+        }
+
+        var normalized = styleId.Trim();
+        if (normalized.StartsWith("Heading", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(normalized[7..], out var level)
+            && level >= 1
+            && level <= 6)
+        {
+            return level;
+        }
+
+        return null;
+    }
+
+    private static string TrimPreview(string text, int maxLength = 120)
+    {
+        var normalized = string.Join(" ", (text ?? string.Empty).Split('\n', '\r').Select(x => x.Trim()).Where(x => x.Length > 0));
+        if (normalized.Length <= maxLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxLength] + "...";
+    }
+
+    private sealed record WordParagraphReference(
+        W.Paragraph Paragraph,
+        string Text,
+        int AllParagraphIndex,
+        int? BodyParagraphIndex,
+        bool InTable,
+        int? TableIndex,
+        int? RowIndex,
+        int? ColumnIndex);
 
     private static object FindTextInExcel(string filePath, string query)
     {

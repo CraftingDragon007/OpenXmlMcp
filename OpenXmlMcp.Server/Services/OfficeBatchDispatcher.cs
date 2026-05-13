@@ -37,6 +37,19 @@ internal static class OfficeBatchDispatcher
                     payload["colorHex"]?.GetValue<string>() ?? "000000"),
             ["word_add_table"] = static (svc, sessionId, payload) =>
                 svc.WordAddTable(sessionId, payload["rows"]?.GetValue<int>() ?? 0, payload["columns"]?.GetValue<int>() ?? 0),
+            ["word_set_table_cell"] = static (svc, sessionId, payload) =>
+                svc.WordSetTableCell(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["rowIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'rowIndex'."),
+                    payload["columnIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'columnIndex'."),
+                    payload["text"]?.GetValue<string>() ?? string.Empty),
+            ["word_get_table_cell"] = static (svc, sessionId, payload) =>
+                _ = svc.WordGetTableCell(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["rowIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'rowIndex'."),
+                    payload["columnIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'columnIndex'.")),
             ["word_insert_paragraph_at"] = static (svc, sessionId, payload) =>
                 svc.WordInsertParagraphAt(sessionId, payload["index"]?.GetValue<int>() ?? 0, payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'.")),
             ["word_replace_text"] = static (svc, sessionId, payload) =>

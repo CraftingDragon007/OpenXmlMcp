@@ -49,6 +49,7 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 ## Word
 
 - Content: `word_append_paragraph`, `word_insert_paragraph_at`, `word_insert_paragraph_after_text`, `word_insert_text_after_text`, `word_replace_text`, `word_add_heading`, `word_add_table`
+- Table cells: `word_set_table_cell`, `word_get_table_cell`
 - Lists: `word_add_bulleted_list`, `word_add_numbered_list`, `word_add_structured_list`
 - Formatting: `word_set_paragraph_style`, `word_set_paragraph_spacing`, `word_set_document_spacing_preset`
 - Styles: `word_list_styles`, `word_apply_style_by_name`, `word_create_or_update_style`
@@ -78,6 +79,18 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 - Operations are validated against the active session's document type.
 - Batch failures include `operation`, `index`, `errorCode`, and `error`.
 - PPTX defaults are generated programmatically (no embedded template dependency).
+
+## Indexing And Structure
+
+- Word paragraph write tools (`word_set_paragraph_style`, `word_set_paragraph_spacing`, `word_apply_style_by_name`) use **1-based body paragraph indexes** (direct body paragraphs only; table-cell paragraphs are excluded).
+- `find_text` for Word returns rich match metadata:
+  - `index` (1-based over all Word paragraphs, including table cells)
+  - `bodyParagraphIndex` (nullable; set only for body paragraphs)
+  - `addressableByParagraphTools` (boolean)
+  - `tableIndex`/`rowIndex`/`columnIndex` for table-cell matches
+- `list_structure` now returns rich structures:
+  - Word: `elements` and `tables` summaries in addition to counts
+  - PowerPoint: `slides` metadata in addition to `slideCount`
 
 ## Run Locally
 
@@ -122,6 +135,19 @@ Batch execute with wrapped payload:
     { "operationName": "word_add_heading", "level": 2, "text": "Section" }
   ]
 }
+```
+
+Set and read a Word table cell:
+
+```text
+word_set_table_cell(sessionId, tableIndex=1, rowIndex=2, columnIndex=1, text="R2C1")
+word_get_table_cell(sessionId, tableIndex=1, rowIndex=2, columnIndex=1)
+```
+
+Set Excel range values with strict JSON:
+
+```json
+[["A", "B"], ["=SUM(C1:D1)", 42]]
 ```
 
 Discover and apply style presets:

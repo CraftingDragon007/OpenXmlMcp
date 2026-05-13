@@ -47,6 +47,8 @@ internal static class OfficeOperationRegistry
             new("word_apply_style_by_name", OfficeDocumentType.Word, true),
             new("word_create_or_update_style", OfficeDocumentType.Word, true),
             new("word_add_table", OfficeDocumentType.Word, true),
+            new("word_set_table_cell", OfficeDocumentType.Word, true),
+            new("word_get_table_cell", OfficeDocumentType.Word, false),
             new("excel_set_cell_value", OfficeDocumentType.Excel, true),
             new("excel_set_cell_style", OfficeDocumentType.Excel, true),
             new("excel_get_cell_value", OfficeDocumentType.Excel, false),

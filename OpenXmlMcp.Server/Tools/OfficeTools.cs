@@ -245,6 +245,29 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Sets text in a Word table cell by 1-based table/row/column indexes.")]
+    public void WordSetTableCell(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index in document body.")] int tableIndex,
+        [Description("1-based row index within the table.")] int rowIndex,
+        [Description("1-based column index within the row.")] int columnIndex,
+        [Description("Cell text value.")] string text)
+    {
+        officeSessionService.WordSetTableCell(sessionId, tableIndex, rowIndex, columnIndex, text);
+    }
+
+    [McpServerTool]
+    [Description("Gets text from a Word table cell by 1-based table/row/column indexes.")]
+    public string WordGetTableCell(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index in document body.")] int tableIndex,
+        [Description("1-based row index within the table.")] int rowIndex,
+        [Description("1-based column index within the row.")] int columnIndex)
+    {
+        return officeSessionService.WordGetTableCell(sessionId, tableIndex, rowIndex, columnIndex);
+    }
+
+    [McpServerTool]
     [Description("Sets a string value in an XLSX cell.")]
     public void ExcelSetCellValue(
         [Description("Active XLSX session id.")] string sessionId,
@@ -291,7 +314,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
-    [Description("Sets a 2D range of values in an XLSX sheet. valuesJson must be a JSON array of arrays.")]
+    [Description("Sets a 2D range of values in an XLSX sheet. valuesJson must be strict JSON array-of-arrays (double-quoted strings). Strings starting with '=' are stored as formulas.")]
     public void ExcelSetRangeValues(
         [Description("Active XLSX session id.")] string sessionId,
         [Description("Sheet name, e.g. Sheet1.")] string sheetName,

@@ -165,6 +165,83 @@ public class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordTableCell_SetAndGet_Works()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 2);
+            service.WordSetTableCell(sessionId, 1, 2, 1, "R2C1");
+
+            var value = service.WordGetTableCell(sessionId, 1, 2, 1);
+            Assert.Equal("R2C1", value);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordStructure_ContainsElementsAndTableSummaries()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddHeading(sessionId, 1, "Title");
+            service.WordAppendParagraph(sessionId, "Intro");
+            service.WordAddTable(sessionId, 1, 1);
+            service.WordSetTableCell(sessionId, 1, 1, 1, "Cell text");
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"elements\"", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"tables\"", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"bodyParagraphCount\"", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Cell text", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordFindText_InTable_ReportsAddressabilityMetadata()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Body anchor");
+            service.WordAddTable(sessionId, 1, 1);
+            service.WordSetTableCell(sessionId, 1, 1, 1, "Table anchor");
+
+            var result = service.FindText(sessionId, "anchor");
+            Assert.Contains("\"addressableByParagraphTools\":true", result, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"addressableByParagraphTools\":false", result, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"tableIndex\":1", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void ExcelSession_AddWorksheet_UpdatesStructure()
     {
         var service = new OfficeSessionService();
@@ -487,6 +564,75 @@ public class OfficeSessionServiceTests
 
             var value = service.ExcelGetCellValue(sessionId, "Sheet1", "C3");
             Assert.Equal("D", value);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSetRangeValues_InvalidJson_ReturnsHelpfulError()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                service.ExcelSetRangeValues(sessionId, "Sheet1", "A1", "[['A','B']]")
+            );
+
+            Assert.Contains("strict JSON", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelSetRangeValues_StringFormula_IsStoredAsFormula()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelSetRangeValues(sessionId, "Sheet1", "A1", "[[\"=SUM(B1:C1)\"]]");
+
+            var formula = service.ExcelGetFormula(sessionId, "Sheet1", "A1");
+            Assert.Equal("SUM(B1:C1)", formula);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointStructure_ContainsSlidesMetadata()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Intro", "Body");
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"slides\"", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"slideIndex\":1", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"title\":\"Intro\"", structure, StringComparison.OrdinalIgnoreCase);
 
             service.CloseDocument(sessionId);
         }
