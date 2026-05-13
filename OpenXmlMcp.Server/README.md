@@ -29,6 +29,13 @@ MCP server built with the official C# MCP SDK and the Open XML SDK.
 
 - `word_add_table(sessionId, rows, columns)` inserts a basic table in Word.
 - `word_set_paragraph_style(sessionId, paragraphIndex, fontName, fontSize, bold, italic, colorHex)` styles a Word paragraph.
+- `word_set_paragraph_spacing(sessionId, paragraphIndex, beforePt, afterPt, lineSpacing)` adjusts paragraph spacing in Word.
+- `word_set_document_spacing_preset(sessionId, preset)` applies Word spacing preset (`compact`, `normal`, `comfortable`).
+- `word_insert_paragraph_after_text(sessionId, anchorText, text, occurrence, matchCase)` inserts a new paragraph after a text match.
+- `word_insert_text_after_text(sessionId, anchorText, text, occurrence, matchCase)` inserts inline text after a text match.
+- `word_list_styles(sessionId)` lists available Word styles in the current document.
+- `word_apply_style_by_name(sessionId, paragraphIndex, styleName)` applies an existing style by id or display name.
+- `word_create_or_update_style(sessionId, styleName, styleJson)` creates/updates custom Word style from JSON options.
 - `excel_add_worksheet(sessionId, sheetName)` adds a worksheet to Excel.
 - `excel_set_cell_style(sessionId, sheetName, cellReference, fontName, fontSize, bold, italic, colorHex)` styles an Excel cell.
 - `powerpoint_add_bullet_slide(sessionId, title, bulletLines)` adds a bullet-style slide.

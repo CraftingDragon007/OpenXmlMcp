@@ -862,4 +862,137 @@ public class OfficeSessionServiceTests
             DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void WordAppendParagraph_AppliesDefaultSpacing()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Spacing test");
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var spacing = document.MainDocumentPart?
+                .Document?
+                .Body?
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                .First()
+                .ParagraphProperties?
+                .SpacingBetweenLines;
+
+            Assert.NotNull(spacing);
+            Assert.Equal("160", spacing!.After?.Value);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordSetDocumentSpacingPreset_Comfortable_UpdatesParagraphSpacing()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "A");
+            service.WordAppendParagraph(sessionId, "B");
+            service.WordSetDocumentSpacingPreset(sessionId, "comfortable");
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var paragraphs = document.MainDocumentPart?
+                .Document?
+                .Body?
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                .ToList() ?? [];
+
+            Assert.NotEmpty(paragraphs);
+            Assert.Equal("200", paragraphs[0].ParagraphProperties?.SpacingBetweenLines?.After?.Value);
+            Assert.Equal("312", paragraphs[0].ParagraphProperties?.SpacingBetweenLines?.Line?.Value);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordInsertParagraphAfterText_InsertsAtExpectedPosition()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Anchor paragraph");
+            var index = service.WordInsertParagraphAfterText(sessionId, "Anchor", "Inserted paragraph");
+
+            Assert.Equal(2, index);
+            var find = service.FindText(sessionId, "Inserted paragraph");
+            Assert.Contains("\"index\":2", find, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordInsertTextAfterText_InsertsInline()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Hello world");
+            var changed = service.WordInsertTextAfterText(sessionId, "Hello", " dear");
+
+            Assert.True(changed);
+            var find = service.FindText(sessionId, "Hello dear world");
+            Assert.Contains("\"matchCount\":1", find, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordCreateOrUpdateStyle_AndApplyStyleByName_Work()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Styled paragraph");
+            service.WordCreateOrUpdateStyle(sessionId, "MyBlueStyle", "{\"fontName\":\"Calibri\",\"fontSize\":14,\"colorHex\":\"1F4E79\",\"afterPt\":8,\"lineSpacing\":1.15}");
+            service.WordApplyStyleByName(sessionId, 1, "MyBlueStyle");
+
+            var styles = service.WordListStyles(sessionId);
+            Assert.Contains("MyBlueStyle", styles, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
 }

@@ -99,6 +99,79 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Sets spacing for a paragraph by 1-based index in a DOCX session.")]
+    public void WordSetParagraphSpacing(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based paragraph index.")] int paragraphIndex,
+        [Description("Spacing before in points.")] int beforePt,
+        [Description("Spacing after in points.")] int afterPt,
+        [Description("Line spacing multiplier, e.g. 1.15.")] double lineSpacing)
+    {
+        officeSessionService.WordSetParagraphSpacing(sessionId, paragraphIndex, beforePt, afterPt, lineSpacing);
+    }
+
+    [McpServerTool]
+    [Description("Applies document-wide paragraph spacing preset in a DOCX session.")]
+    public void WordSetDocumentSpacingPreset(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Preset: compact, normal, comfortable.")] string preset = "normal")
+    {
+        officeSessionService.WordSetDocumentSpacingPreset(sessionId, preset);
+    }
+
+    [McpServerTool]
+    [Description("Inserts a paragraph after a paragraph containing anchor text.")]
+    public int WordInsertParagraphAfterText(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Anchor text sequence to search.")] string anchorText,
+        [Description("Paragraph text to insert.")] string text,
+        [Description("1-based occurrence of the anchor text.")] int occurrence = 1,
+        [Description("Use case-sensitive matching.")] bool matchCase = false)
+    {
+        return officeSessionService.WordInsertParagraphAfterText(sessionId, anchorText, text, occurrence, matchCase);
+    }
+
+    [McpServerTool]
+    [Description("Inserts inline text immediately after a text sequence match.")]
+    public bool WordInsertTextAfterText(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Anchor text sequence to search.")] string anchorText,
+        [Description("Text to insert after the anchor.")] string text,
+        [Description("1-based occurrence of the anchor text.")] int occurrence = 1,
+        [Description("Use case-sensitive matching.")] bool matchCase = false)
+    {
+        return officeSessionService.WordInsertTextAfterText(sessionId, anchorText, text, occurrence, matchCase);
+    }
+
+    [McpServerTool]
+    [Description("Lists available paragraph/character styles in a DOCX session.")]
+    public string WordListStyles(
+        [Description("Active DOCX session id.")] string sessionId)
+    {
+        return officeSessionService.WordListStyles(sessionId);
+    }
+
+    [McpServerTool]
+    [Description("Applies an existing Word style by style id or style name.")]
+    public void WordApplyStyleByName(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based paragraph index.")] int paragraphIndex,
+        [Description("Style id or style name.")] string styleName)
+    {
+        officeSessionService.WordApplyStyleByName(sessionId, paragraphIndex, styleName);
+    }
+
+    [McpServerTool]
+    [Description("Creates or updates a custom Word paragraph style from JSON options.")]
+    public void WordCreateOrUpdateStyle(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Custom style display name.")] string styleName,
+        [Description("JSON options for style properties.")] string styleJson)
+    {
+        officeSessionService.WordCreateOrUpdateStyle(sessionId, styleName, styleJson);
+    }
+
+    [McpServerTool]
     [Description("Inserts a paragraph at a 1-based index in a DOCX session.")]
     public void WordInsertParagraphAt(
         [Description("Active DOCX session id.")] string sessionId,

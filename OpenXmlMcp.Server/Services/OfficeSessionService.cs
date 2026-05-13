@@ -15,6 +15,15 @@ namespace OpenXmlMcp.Server.Services;
 
 public class OfficeSessionService
 {
+    private const int DefaultParagraphBeforePt = 0;
+    private const int DefaultParagraphAfterPt = 8;
+    private const double DefaultParagraphLineSpacing = 1.15;
+    private const int DefaultHeadingBeforePt = 12;
+    private const int DefaultHeadingAfterPt = 6;
+    private const double DefaultHeadingLineSpacing = 1.15;
+    private const int DefaultListBeforePt = 0;
+    private const int DefaultListAfterPt = 2;
+    private const double DefaultListLineSpacing = 1.15;
     private readonly ConcurrentDictionary<string, OfficeSession> _sessions = new();
     private readonly ConcurrentDictionary<string, Stack<string>> _sessionSnapshots = new();
     private readonly ConcurrentDictionary<string, List<OperationLogEntry>> _sessionOperationLog = new();
@@ -251,6 +260,7 @@ public class OfficeSessionService
             }
 
             var newParagraph = new W.Paragraph(new W.Run(new W.Text(text)));
+            ApplyWordParagraphSpacing(newParagraph, DefaultParagraphBeforePt, DefaultParagraphAfterPt, DefaultParagraphLineSpacing);
             if (paragraphs.Count == 0 || index == paragraphs.Count + 1)
             {
                 body.Append(newParagraph);
@@ -318,6 +328,7 @@ public class OfficeSessionService
             var heading = new W.Paragraph(
                 new W.ParagraphProperties(new W.ParagraphStyleId { Val = $"Heading{level}" }),
                 new W.Run(new W.Text(text)));
+            ApplyWordParagraphSpacing(heading, DefaultHeadingBeforePt, DefaultHeadingAfterPt, DefaultHeadingLineSpacing);
 
             body.Append(heading);
             document.MainDocumentPart.Document?.Save();
@@ -379,6 +390,7 @@ public class OfficeSessionService
                             new W.NumberingLevelReference { Val = item.Level },
                             new W.NumberingId { Val = numberingId })),
                     new W.Run(new W.Text(item.Text)));
+                ApplyWordParagraphSpacing(paragraph, DefaultListBeforePt, DefaultListAfterPt, DefaultListLineSpacing);
                 body.Append(paragraph);
             }
 
@@ -517,6 +529,231 @@ public class OfficeSessionService
             default:
                 throw new InvalidOperationException("Unsupported document type.");
         }
+    }
+
+    public void WordSetParagraphSpacing(string sessionId, int paragraphIndex, int beforePt, int afterPt, double lineSpacing)
+    {
+        if (beforePt < 0 || afterPt < 0)
+        {
+            throw new InvalidOperationException("Paragraph spacing before/after must be >= 0.");
+        }
+
+        if (lineSpacing <= 0)
+        {
+            throw new InvalidOperationException("Line spacing must be greater than 0.");
+        }
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_set_paragraph_spacing", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+            if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
+            {
+                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count}.");
+            }
+
+            ApplyWordParagraphSpacing(paragraphs[paragraphIndex - 1], beforePt, afterPt, lineSpacing);
+            document.MainDocumentPart.Document?.Save();
+        });
+    }
+
+    public void WordSetDocumentSpacingPreset(string sessionId, string preset = "normal")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(preset);
+        var normalized = preset.Trim().ToLowerInvariant();
+        var settings = normalized switch
+        {
+            "compact" => (beforePt: 0, afterPt: 4, lineSpacing: 1.0),
+            "comfortable" => (beforePt: 0, afterPt: 10, lineSpacing: 1.3),
+            _ => (beforePt: DefaultParagraphBeforePt, afterPt: DefaultParagraphAfterPt, lineSpacing: DefaultParagraphLineSpacing)
+        };
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_set_document_spacing_preset", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            foreach (var paragraph in body.Elements<W.Paragraph>())
+            {
+                ApplyWordParagraphSpacing(paragraph, settings.beforePt, settings.afterPt, settings.lineSpacing);
+            }
+
+            document.MainDocumentPart.Document?.Save();
+        });
+    }
+
+    public int WordInsertParagraphAfterText(string sessionId, string anchorText, string text, int occurrence = 1, bool matchCase = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(anchorText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (occurrence < 1)
+        {
+            throw new InvalidOperationException("Occurrence must be >= 1.");
+        }
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var insertedIndex = -1;
+        ExecuteWriteOperation(session, "word_insert_paragraph_after_text", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+            var match = paragraphs
+                .Select((p, i) => new { Paragraph = p, Index = i + 1 })
+                .Where(x => x.Paragraph.InnerText.Contains(anchorText, comparison))
+                .Skip(occurrence - 1)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException($"Anchor text '{anchorText}' occurrence {occurrence} was not found.");
+
+            var newParagraph = new W.Paragraph(new W.Run(new W.Text(text)));
+            ApplyWordParagraphSpacing(newParagraph, DefaultParagraphBeforePt, DefaultParagraphAfterPt, DefaultParagraphLineSpacing);
+            match.Paragraph.InsertAfterSelf(newParagraph);
+            insertedIndex = match.Index + 1;
+
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return insertedIndex;
+    }
+
+    public bool WordInsertTextAfterText(string sessionId, string anchorText, string text, int occurrence = 1, bool matchCase = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(anchorText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (occurrence < 1)
+        {
+            throw new InvalidOperationException("Occurrence must be >= 1.");
+        }
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var replaced = false;
+        ExecuteWriteOperation(session, "word_insert_text_after_text", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var textNodes = document.MainDocumentPart?.Document?.Descendants<W.Text>().ToList()
+                ?? throw new InvalidOperationException("Word text nodes are missing.");
+
+            var remaining = occurrence;
+            foreach (var node in textNodes)
+            {
+                if (string.IsNullOrEmpty(node.Text))
+                {
+                    continue;
+                }
+
+                var index = node.Text.IndexOf(anchorText, comparison);
+                if (index < 0)
+                {
+                    continue;
+                }
+
+                remaining--;
+                if (remaining > 0)
+                {
+                    continue;
+                }
+
+                var insertPos = index + anchorText.Length;
+                node.Text = node.Text[..insertPos] + text + node.Text[insertPos..];
+                replaced = true;
+                break;
+            }
+
+            if (!replaced)
+            {
+                throw new InvalidOperationException($"Anchor text '{anchorText}' occurrence {occurrence} was not found.");
+            }
+
+            document.MainDocumentPart?.Document?.Save();
+        });
+
+        return replaced;
+    }
+
+    public string WordListStyles(string sessionId)
+    {
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.Word)
+        {
+            throw new InvalidOperationException("Session document type is not Word.");
+        }
+
+        using var document = WordprocessingDocument.Open(session.FilePath, false);
+        var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
+        var payload = styles.Select(style => new
+        {
+            styleId = style.StyleId?.Value ?? string.Empty,
+            name = style.StyleName?.Val?.Value ?? string.Empty,
+            type = style.Type?.Value.ToString() ?? string.Empty,
+            isDefault = style.Default?.Value ?? false
+        }).ToArray();
+
+        return JsonSerializer.Serialize(new { count = payload.Length, styles = payload });
+    }
+
+    public void WordApplyStyleByName(string sessionId, int paragraphIndex, string styleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_apply_style_by_name", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+            if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
+            {
+                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count}.");
+            }
+
+            var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
+            var style = styles.FirstOrDefault(s =>
+                string.Equals(s.StyleId?.Value, styleName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s.StyleName?.Val?.Value, styleName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Style '{styleName}' was not found in document.");
+
+            var paragraph = paragraphs[paragraphIndex - 1];
+            var paragraphProperties = paragraph.ParagraphProperties ??= new W.ParagraphProperties();
+            paragraphProperties.ParagraphStyleId = new W.ParagraphStyleId { Val = style.StyleId?.Value };
+            document.MainDocumentPart?.Document?.Save();
+        });
+    }
+
+    public void WordCreateOrUpdateStyle(string sessionId, string styleName, string styleJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleJson);
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_create_or_update_style", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            var stylePart = mainPart.StyleDefinitionsPart ?? mainPart.AddNewPart<StyleDefinitionsPart>();
+            stylePart.Styles ??= new W.Styles();
+
+            var styleId = SanitizeStyleId(styleName);
+            var style = stylePart.Styles.Elements<W.Style>().FirstOrDefault(s => string.Equals(s.StyleId?.Value, styleId, StringComparison.OrdinalIgnoreCase));
+            if (style is null)
+            {
+                style = new W.Style { Type = W.StyleValues.Paragraph, StyleId = styleId, CustomStyle = true };
+                style.Append(new W.StyleName { Val = styleName });
+                style.Append(new W.BasedOn { Val = "Normal" });
+                style.Append(new W.NextParagraphStyle { Val = "Normal" });
+                style.Append(new W.UIPriority { Val = 99 });
+                style.Append(new W.UnhideWhenUsed());
+                style.Append(new W.PrimaryStyle());
+                stylePart.Styles.Append(style);
+            }
+
+            var options = JsonNode.Parse(styleJson) as JsonObject ?? throw new InvalidOperationException("Invalid styleJson object.");
+            ApplyStyleOptions(style, options);
+            stylePart.Styles.Save();
+            mainPart.Document?.Save();
+        });
     }
 
     public void WordSetParagraphStyle(string sessionId, int paragraphIndex, string fontName, int fontSize, bool bold, bool italic, string colorHex)
@@ -677,6 +914,8 @@ public class OfficeSessionService
             }
 
             body.AppendChild(new W.Paragraph(new W.Run(new W.Text(text))));
+            var paragraph = body.Elements<W.Paragraph>().Last();
+            ApplyWordParagraphSpacing(paragraph, DefaultParagraphBeforePt, DefaultParagraphAfterPt, DefaultParagraphLineSpacing);
             document.MainDocumentPart!.Document!.Save();
         });
     }
@@ -1389,6 +1628,16 @@ public class OfficeSessionService
         ApplyWordParagraphMarkProperties(paragraphProperties.ParagraphMarkRunProperties, style);
     }
 
+    private static void ApplyWordParagraphSpacing(W.Paragraph paragraph, int beforePt, int afterPt, double lineSpacing)
+    {
+        var paragraphProperties = paragraph.ParagraphProperties ??= new W.ParagraphProperties();
+        var spacing = paragraphProperties.SpacingBetweenLines ??= new W.SpacingBetweenLines();
+        spacing.Before = (beforePt * 20).ToString();
+        spacing.After = (afterPt * 20).ToString();
+        spacing.Line = ((int)Math.Round(lineSpacing * 240)).ToString();
+        spacing.LineRule = W.LineSpacingRuleValues.Auto;
+    }
+
     private static void ApplyWordRunProperties(W.RunProperties runProperties, TextStyle style)
     {
         runProperties.RunFonts = new W.RunFonts { Ascii = style.FontName, HighAnsi = style.FontName, ComplexScript = style.FontName };
@@ -1463,6 +1712,98 @@ public class OfficeSessionService
         }
 
         return value.All(Uri.IsHexDigit);
+    }
+
+    private static string SanitizeStyleId(string styleName)
+    {
+        var cleaned = new string(styleName.Where(char.IsLetterOrDigit).ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? $"Custom{Guid.NewGuid():N}" : cleaned;
+    }
+
+    private static void ApplyStyleOptions(W.Style style, JsonObject options)
+    {
+        if (!style.Elements<W.UnhideWhenUsed>().Any())
+        {
+            style.Append(new W.UnhideWhenUsed());
+        }
+
+        if (!style.Elements<W.PrimaryStyle>().Any())
+        {
+            style.Append(new W.PrimaryStyle());
+        }
+
+        if (!style.Elements<W.UIPriority>().Any())
+        {
+            style.Append(new W.UIPriority { Val = 99 });
+        }
+
+        var paragraphProperties = style.StyleParagraphProperties ??= new W.StyleParagraphProperties();
+        var runProperties = style.StyleRunProperties ??= new W.StyleRunProperties();
+
+        if (options.TryGetPropertyValue("basedOn", out var basedOnNode) && basedOnNode is not null)
+        {
+            style.BasedOn = new W.BasedOn { Val = basedOnNode.GetValue<string>() };
+        }
+
+        if (options.TryGetPropertyValue("nextStyle", out var nextStyleNode) && nextStyleNode is not null)
+        {
+            style.NextParagraphStyle = new W.NextParagraphStyle { Val = nextStyleNode.GetValue<string>() };
+        }
+
+        if (options.TryGetPropertyValue("fontName", out var fontNameNode) && fontNameNode is not null)
+        {
+            var fontName = fontNameNode.GetValue<string>();
+            runProperties.RunFonts = new W.RunFonts { Ascii = fontName, HighAnsi = fontName, ComplexScript = fontName };
+        }
+
+        if (options.TryGetPropertyValue("fontSize", out var fontSizeNode) && fontSizeNode is not null)
+        {
+            runProperties.FontSize = new W.FontSize { Val = (fontSizeNode.GetValue<int>() * 2).ToString() };
+        }
+
+        if (options.TryGetPropertyValue("bold", out var boldNode) && boldNode is not null)
+        {
+            runProperties.Bold = boldNode.GetValue<bool>() ? new W.Bold() : null;
+        }
+
+        if (options.TryGetPropertyValue("italic", out var italicNode) && italicNode is not null)
+        {
+            runProperties.Italic = italicNode.GetValue<bool>() ? new W.Italic() : null;
+        }
+
+        if (options.TryGetPropertyValue("colorHex", out var colorNode) && colorNode is not null)
+        {
+            var color = colorNode.GetValue<string>();
+            if (!IsValidHexColor(color))
+            {
+                throw new InvalidOperationException("Style colorHex must be a 6-digit hex value.");
+            }
+
+            runProperties.Color = new W.Color { Val = color };
+        }
+
+        var beforePt = options.TryGetPropertyValue("beforePt", out var beforeNode) && beforeNode is not null ? beforeNode.GetValue<int>() : 0;
+        var afterPt = options.TryGetPropertyValue("afterPt", out var afterNode) && afterNode is not null ? afterNode.GetValue<int>() : 0;
+        var lineSpacing = options.TryGetPropertyValue("lineSpacing", out var lineSpacingNode) && lineSpacingNode is not null ? lineSpacingNode.GetValue<double>() : 0;
+        if (beforePt > 0 || afterPt > 0 || lineSpacing > 0)
+        {
+            paragraphProperties.SpacingBetweenLines ??= new W.SpacingBetweenLines();
+            if (beforePt >= 0)
+            {
+                paragraphProperties.SpacingBetweenLines.Before = (beforePt * 20).ToString();
+            }
+
+            if (afterPt >= 0)
+            {
+                paragraphProperties.SpacingBetweenLines.After = (afterPt * 20).ToString();
+            }
+
+            if (lineSpacing > 0)
+            {
+                paragraphProperties.SpacingBetweenLines.Line = ((int)Math.Round(lineSpacing * 240)).ToString();
+                paragraphProperties.SpacingBetweenLines.LineRule = W.LineSpacingRuleValues.Auto;
+            }
+        }
     }
 
     private static uint EnsureExcelCellFormat(WorkbookPart workbookPart, TextStyle style)

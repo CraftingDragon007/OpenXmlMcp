@@ -57,6 +57,42 @@ internal static class OfficeBatchDispatcher
                 svc.WordAddStructuredList(
                     sessionId,
                     payload["itemsJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'itemsJson'.")),
+            ["word_set_paragraph_spacing"] = static (svc, sessionId, payload) =>
+                svc.WordSetParagraphSpacing(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? 1,
+                    payload["beforePt"]?.GetValue<int>() ?? 0,
+                    payload["afterPt"]?.GetValue<int>() ?? 8,
+                    payload["lineSpacing"]?.GetValue<double>() ?? 1.15),
+            ["word_set_document_spacing_preset"] = static (svc, sessionId, payload) =>
+                svc.WordSetDocumentSpacingPreset(
+                    sessionId,
+                    payload["preset"]?.GetValue<string>() ?? "normal"),
+            ["word_insert_paragraph_after_text"] = static (svc, sessionId, payload) =>
+                svc.WordInsertParagraphAfterText(
+                    sessionId,
+                    payload["anchorText"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'anchorText'."),
+                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."),
+                    payload["occurrence"]?.GetValue<int>() ?? 1,
+                    payload["matchCase"]?.GetValue<bool>() ?? false),
+            ["word_insert_text_after_text"] = static (svc, sessionId, payload) =>
+                svc.WordInsertTextAfterText(
+                    sessionId,
+                    payload["anchorText"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'anchorText'."),
+                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."),
+                    payload["occurrence"]?.GetValue<int>() ?? 1,
+                    payload["matchCase"]?.GetValue<bool>() ?? false),
+            ["word_apply_style_by_name"] = static (svc, sessionId, payload) =>
+                svc.WordApplyStyleByName(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? 1,
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'.")),
+            ["word_create_or_update_style"] = static (svc, sessionId, payload) =>
+                svc.WordCreateOrUpdateStyle(
+                    sessionId,
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
+                    payload["styleJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleJson'.")),
+            ["word_list_styles"] = static (svc, sessionId, _) => _ = svc.WordListStyles(sessionId),
             ["excel_set_cell_value"] = static (svc, sessionId, payload) =>
                 svc.ExcelSetCellValue(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."), payload["value"]?.GetValue<string>() ?? string.Empty),
             ["excel_set_cell_style"] = static (svc, sessionId, payload) =>
