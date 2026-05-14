@@ -38,6 +38,7 @@ public class OfficeSessionService
     private readonly ConcurrentDictionary<string, OfficeSession> _sessions = new();
     private readonly ConcurrentDictionary<string, Stack<string>> _sessionSnapshots = new();
     private readonly ConcurrentDictionary<string, List<OperationLogEntry>> _sessionOperationLog = new();
+    private readonly ConcurrentDictionary<string, object> _sessionWriteLocks = new();
     private const long MaxOpenFileSizeBytes = 20 * 1024 * 1024;
 
     public string OpenDocument(string filePath, bool readOnly = false)
@@ -67,6 +68,7 @@ public class OfficeSessionService
         _sessions[session.Id] = session;
         _sessionSnapshots.TryAdd(session.Id, new Stack<string>());
         _sessionOperationLog.TryAdd(session.Id, new List<OperationLogEntry>());
+        _sessionWriteLocks.TryAdd(session.Id, new object());
         AppendOperationLog(session.Id, "open_document", $"Opened '{normalizedPath}' (readOnly={readOnly}).");
         return session.Id;
     }
@@ -99,6 +101,7 @@ public class OfficeSessionService
         }
 
         _sessionOperationLog.TryRemove(sessionId, out _);
+        _sessionWriteLocks.TryRemove(sessionId, out _);
 
         if (!_sessions.TryRemove(sessionId, out _))
         {
@@ -236,10 +239,12 @@ public class OfficeSessionService
         }
 
         var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var tableIndex = -1;
         ExecuteWriteOperation(session, "word_add_table", () =>
         {
             using var document = WordprocessingDocument.Open(session.FilePath, true);
             var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            tableIndex = body.Elements<W.Table>().Count() + 1;
 
             var table = new W.Table();
             for (var r = 0; r < rows; r++)
@@ -257,7 +262,7 @@ public class OfficeSessionService
             document.MainDocumentPart.Document?.Save();
         });
 
-        return BuildMutationResult("word_add_table", new { rows, columns });
+        return BuildMutationResult("word_add_table", new { rows, columns, tableIndex });
     }
 
     public string WordSetTableCell(string sessionId, int tableIndex, int rowIndex, int columnIndex, string text)
@@ -310,6 +315,42 @@ public class OfficeSessionService
         return string.Join("\n", cell.Elements<W.Paragraph>().Select(p => p.InnerText));
     }
 
+    public string WordGetParagraphInfo(string sessionId, int paragraphIndex)
+    {
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.Word)
+        {
+            throw new InvalidOperationException("Session document type is not Word.");
+        }
+
+        using var document = WordprocessingDocument.Open(session.FilePath, false);
+        var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+        var paragraphs = body.Elements<W.Paragraph>().ToList();
+        if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
+        {
+            throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
+        }
+
+        var paragraph = paragraphs[paragraphIndex - 1];
+        var pPr = paragraph.ParagraphProperties;
+        var spacing = pPr?.SpacingBetweenLines;
+        var styleId = pPr?.ParagraphStyleId?.Val?.Value ?? string.Empty;
+        var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
+        var styleName = styles.FirstOrDefault(s => string.Equals(s.StyleId?.Value, styleId, StringComparison.OrdinalIgnoreCase))?.StyleName?.Val?.Value ?? string.Empty;
+
+        return JsonSerializer.Serialize(new
+        {
+            paragraphIndex,
+            text = paragraph.InnerText,
+            styleId,
+            styleName,
+            spacingBeforeTwips = spacing?.Before?.Value ?? string.Empty,
+            spacingAfterTwips = spacing?.After?.Value ?? string.Empty,
+            lineTwips = spacing?.Line?.Value ?? string.Empty,
+            lineRule = spacing?.LineRule?.Value.ToString() ?? string.Empty
+        });
+    }
+
     public string WordInsertParagraphAt(string sessionId, int index, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
@@ -343,7 +384,7 @@ public class OfficeSessionService
         return BuildMutationResult("word_insert_paragraph_at", new { index });
     }
 
-    public int WordReplaceText(string sessionId, string find, string replace, bool matchCase = false)
+    public string WordReplaceText(string sessionId, string find, string replace, bool matchCase = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(find);
         replace ??= string.Empty;
@@ -377,10 +418,10 @@ public class OfficeSessionService
             document.MainDocumentPart.Document?.Save();
         });
 
-        return replacements;
+        return BuildMutationResult("word_replace_text", new { replacementCount = replacements }, replacements > 0);
     }
 
-    public void WordAddHeading(string sessionId, int level, string text)
+    public string WordAddHeading(string sessionId, int level, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         if (level < 1 || level > 6)
@@ -402,6 +443,8 @@ public class OfficeSessionService
             body.Append(heading);
             document.MainDocumentPart.Document?.Save();
         });
+
+        return BuildMutationResult("word_add_heading", new { level, textPreview = TrimPreview(text) });
     }
 
     public string WordAddBulletedList(string sessionId, string lines, string bulletStyle = "disc")
@@ -679,7 +722,7 @@ public class OfficeSessionService
         return BuildMutationResult("apply_text_preset", new { preset = normalized, targetIndex });
     }
 
-    public void WordSetParagraphSpacing(string sessionId, int paragraphIndex, int beforePt, int afterPt, double lineSpacing)
+    public string WordSetParagraphSpacing(string sessionId, int paragraphIndex, int beforePt, int afterPt, double lineSpacing)
     {
         if (beforePt < 0 || afterPt < 0)
         {
@@ -705,9 +748,11 @@ public class OfficeSessionService
             ApplyWordParagraphSpacing(paragraphs[paragraphIndex - 1], beforePt, afterPt, lineSpacing);
             document.MainDocumentPart.Document?.Save();
         });
+
+        return BuildMutationResult("word_set_paragraph_spacing", new { paragraphIndex, beforePt, afterPt, lineSpacing });
     }
 
-    public void WordSetDocumentSpacingPreset(string sessionId, string preset = "normal")
+    public string WordSetDocumentSpacingPreset(string sessionId, string preset = "normal")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(preset);
         var normalized = preset.Trim().ToLowerInvariant();
@@ -730,9 +775,11 @@ public class OfficeSessionService
 
             document.MainDocumentPart.Document?.Save();
         });
+
+        return BuildMutationResult("word_set_document_spacing_preset", new { preset = normalized });
     }
 
-    public int WordInsertParagraphAfterText(string sessionId, string anchorText, string text, int occurrence = 1, bool matchCase = false)
+    public string WordInsertParagraphAfterText(string sessionId, string anchorText, string text, int occurrence = 1, bool matchCase = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(anchorText);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
@@ -765,10 +812,10 @@ public class OfficeSessionService
             document.MainDocumentPart.Document?.Save();
         });
 
-        return insertedIndex;
+        return BuildMutationResult("word_insert_paragraph_after_text", new { insertedIndex, occurrence });
     }
 
-    public bool WordInsertTextAfterText(string sessionId, string anchorText, string text, int occurrence = 1, bool matchCase = false)
+    public string WordInsertTextAfterText(string sessionId, string anchorText, string text, int occurrence = 1, bool matchCase = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(anchorText);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
@@ -820,7 +867,7 @@ public class OfficeSessionService
             document.MainDocumentPart?.Document?.Save();
         });
 
-        return replaced;
+        return BuildMutationResult("word_insert_text_after_text", new { occurrence }, replaced);
     }
 
     public string WordListStyles(string sessionId)
@@ -837,14 +884,14 @@ public class OfficeSessionService
         {
             styleId = style.StyleId?.Value ?? string.Empty,
             name = style.StyleName?.Val?.Value ?? string.Empty,
-            type = style.Type?.Value.ToString() ?? string.Empty,
+            type = ResolveWordStyleType(style),
             isDefault = style.Default?.Value ?? false
         }).ToArray();
 
         return JsonSerializer.Serialize(new { count = payload.Length, styles = payload });
     }
 
-    public void WordApplyStyleByName(string sessionId, int paragraphIndex, string styleName)
+    public string WordApplyStyleByName(string sessionId, int paragraphIndex, string styleName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
         var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
@@ -869,9 +916,11 @@ public class OfficeSessionService
             paragraphProperties.ParagraphStyleId = new W.ParagraphStyleId { Val = style.StyleId?.Value };
             document.MainDocumentPart?.Document?.Save();
         });
+
+        return BuildMutationResult("word_apply_style_by_name", new { paragraphIndex, styleName });
     }
 
-    public void WordCreateOrUpdateStyle(string sessionId, string styleName, string styleJson)
+    public string WordCreateOrUpdateStyle(string sessionId, string styleName, string styleJson)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
         ArgumentException.ThrowIfNullOrWhiteSpace(styleJson);
@@ -902,21 +951,26 @@ public class OfficeSessionService
             stylePart.Styles.Save();
             mainPart.Document?.Save();
         });
+
+        return BuildMutationResult("word_create_or_update_style", new { styleName, styleId = SanitizeStyleId(styleName) });
     }
 
-    public void WordSetParagraphStyle(string sessionId, int paragraphIndex, string fontName, int fontSize, bool bold, bool italic, string colorHex)
+    public string WordSetParagraphStyle(string sessionId, int paragraphIndex, string fontName, int fontSize, bool bold, bool italic, string colorHex)
     {
         WordSetParagraphStyle(sessionId, paragraphIndex, new TextStyle(fontName, fontSize, bold, italic, colorHex));
+        return BuildMutationResult("word_set_paragraph_style", new { paragraphIndex });
     }
 
-    public void ExcelSetCellStyle(string sessionId, string sheetName, string cellReference, string fontName, int fontSize, bool bold, bool italic, string colorHex)
+    public string ExcelSetCellStyle(string sessionId, string sheetName, string cellReference, string fontName, int fontSize, bool bold, bool italic, string colorHex)
     {
         ExcelSetCellStyle(sessionId, sheetName, cellReference, new TextStyle(fontName, fontSize, bold, italic, colorHex));
+        return BuildMutationResult("excel_set_cell_style", new { sheetName, cellReference = cellReference.ToUpperInvariant() });
     }
 
-    public void PowerPointSetTextStyle(string sessionId, int slideIndex, int slot, string fontName, int fontSize, bool bold, bool italic, string colorHex)
+    public string PowerPointSetTextStyle(string sessionId, int slideIndex, int slot, string fontName, int fontSize, bool bold, bool italic, string colorHex)
     {
         PowerPointSetTextStyle(sessionId, slideIndex, slot, new TextStyle(fontName, fontSize, bold, italic, colorHex));
+        return BuildMutationResult("powerpoint_set_text_style", new { slideIndex, slot }, publicOperationName: "power_point_set_text_style", canonicalOperationName: "powerpoint_set_text_style");
     }
 
     private void WordSetParagraphStyle(string sessionId, int paragraphIndex, TextStyle style)
@@ -975,6 +1029,7 @@ public class OfficeSessionService
             cell.StyleIndex = styleIndex;
 
             worksheet.Save();
+            MarkWorkbookForRecalculation(workbookPart);
             GetWorkbook(workbookPart).Save();
         });
     }
@@ -990,7 +1045,7 @@ public class OfficeSessionService
             var slidePart = GetSlidePartByIndex(GetPresentationPart(presentation), slideIndex);
             ApplyPowerPointSlotStyle(slidePart, slot, style);
             GetSlide(slidePart).Save();
-        });
+        }, "power_point_set_text_style");
     }
 
     private static void ApplyWordStylePreset(string filePath)
@@ -1103,6 +1158,7 @@ public class OfficeSessionService
             cell.CellValue = new CellValue(value);
 
             worksheet.Save();
+            MarkWorkbookForRecalculation(workbookPart);
             GetWorkbook(workbookPart).Save();
         });
 
@@ -1164,6 +1220,8 @@ public class OfficeSessionService
             });
         }
 
+        var styleDetails = ResolveExcelCellStyle(workbookPart, cell);
+
         return JsonSerializer.Serialize(new
         {
             sheetName,
@@ -1173,8 +1231,139 @@ public class OfficeSessionService
             formula = cell.CellFormula?.Text ?? string.Empty,
             cachedValue = cell.CellValue?.Text ?? string.Empty,
             dataType = cell.DataType?.Value.ToString() ?? string.Empty,
-            styleIndex = cell.StyleIndex?.Value ?? 0UL
+            styleIndex = cell.StyleIndex?.Value ?? 0UL,
+            style = styleDetails
         });
+    }
+
+    public string ExcelGetCellStyle(string sessionId, string sheetName, string cellReference)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sheetName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(cellReference);
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.Excel)
+        {
+            throw new InvalidOperationException("Session document type is not Excel.");
+        }
+
+        using var spreadsheet = SpreadsheetDocument.Open(session.FilePath, false);
+        var workbookPart = GetWorkbookPart(spreadsheet);
+        var sheet = GetSheetByName(workbookPart, sheetName);
+        var worksheetPart = GetWorksheetPart(workbookPart, sheet);
+        var worksheet = GetWorksheet(worksheetPart);
+        var normalizedRef = cellReference.ToUpperInvariant();
+        var cell = worksheet.Descendants<Cell>()
+            .FirstOrDefault(c => string.Equals(c.CellReference?.Value, normalizedRef, StringComparison.OrdinalIgnoreCase));
+
+        if (cell is null)
+        {
+            return JsonSerializer.Serialize(new { sheetName, cellReference = normalizedRef, exists = false, styleIndex = -1, style = new { } });
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            sheetName,
+            cellReference = normalizedRef,
+            exists = true,
+            styleIndex = (long)(cell.StyleIndex?.Value ?? 0UL),
+            style = ResolveExcelCellStyle(workbookPart, cell)
+        });
+    }
+
+    public string PowerPointGetTextStyle(string sessionId, int slideIndex, int slot)
+    {
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.PowerPoint)
+        {
+            throw new InvalidOperationException("Session document type is not PowerPoint.");
+        }
+
+        using var presentation = PresentationDocument.Open(session.FilePath, false);
+        var slidePart = GetSlidePartByIndex(GetPresentationPart(presentation), slideIndex);
+        var paragraphs = GetSlide(slidePart)
+            .Descendants<P.Shape>()
+            .Select(shape => shape.TextBody)
+            .Where(textBody => textBody is not null)
+            .SelectMany(textBody => textBody!.Elements<A.Paragraph>())
+            .ToList();
+
+        if (paragraphs.Count == 0)
+        {
+            throw new InvalidOperationException("Slide does not contain editable text placeholders.");
+        }
+
+        var target = slot switch
+        {
+            <= 0 => paragraphs[0],
+            1 when paragraphs.Count > 1 => paragraphs[1],
+            _ => paragraphs[Math.Clamp(slot, 0, paragraphs.Count - 1)]
+        };
+
+        A.TextCharacterPropertiesType? runProps = target.Elements<A.Run>().FirstOrDefault()?.RunProperties;
+        runProps ??= target.GetFirstChild<A.EndParagraphRunProperties>();
+
+        return JsonSerializer.Serialize(new
+        {
+            slideIndex,
+            slot,
+            fontName = runProps?.GetFirstChild<A.LatinFont>()?.Typeface?.Value ?? string.Empty,
+            fontSize = ((runProps?.FontSize?.Value ?? 0) / 100),
+            bold = runProps?.Bold?.Value ?? false,
+            italic = runProps?.Italic?.Value ?? false,
+            colorHex = runProps?.GetFirstChild<A.SolidFill>()?.GetFirstChild<A.RgbColorModelHex>()?.Val?.Value ?? string.Empty
+        });
+    }
+
+    private static object ResolveExcelCellStyle(WorkbookPart workbookPart, Cell cell)
+    {
+        var styleIndex = cell.StyleIndex?.Value ?? 0UL;
+        var stylesheet = workbookPart.WorkbookStylesPart?.Stylesheet;
+        var cellFormat = stylesheet?.CellFormats?.Elements<CellFormat>().ElementAtOrDefault((int)styleIndex);
+        var fontId = (int)(cellFormat?.FontId?.Value ?? 0U);
+        var font = stylesheet?.Fonts?.Elements<DocumentFormat.OpenXml.Spreadsheet.Font>().ElementAtOrDefault(fontId);
+
+        return new
+        {
+            fontName = font?.FontName?.Val?.Value ?? string.Empty,
+            fontSize = font?.FontSize?.Val?.Value ?? 0,
+            bold = font?.Bold is not null,
+            italic = font?.Italic is not null,
+            colorHex = font?.Color?.Rgb?.Value?.Replace("FF", string.Empty, StringComparison.OrdinalIgnoreCase) ?? string.Empty
+        };
+    }
+
+    private static void MarkWorkbookForRecalculation(WorkbookPart workbookPart)
+    {
+        var workbook = GetWorkbook(workbookPart);
+        workbook.CalculationProperties ??= new CalculationProperties();
+        workbook.CalculationProperties.FullCalculationOnLoad = true;
+        workbook.CalculationProperties.ForceFullCalculation = true;
+    }
+
+    private static string ResolveWordStyleType(W.Style style)
+    {
+        var type = style.Type?.Value;
+        if (type == W.StyleValues.Paragraph)
+        {
+            return "paragraph";
+        }
+
+        if (type == W.StyleValues.Character)
+        {
+            return "character";
+        }
+
+        if (type == W.StyleValues.Table)
+        {
+            return "table";
+        }
+
+        if (type == W.StyleValues.Numbering)
+        {
+            return "numbering";
+        }
+
+        return string.Empty;
     }
 
     public string ExcelGetUsedRange(string sessionId, string sheetName)
@@ -1357,7 +1546,7 @@ public class OfficeSessionService
         var session = GetWritableSession(sessionId, OfficeDocumentType.PowerPoint);
 
         ExecuteWriteOperation(session, "powerpoint_add_slide", () => PowerPointAddSlideCore(session.FilePath, title, body, parsedBodyType), "power_point_add_slide");
-        return BuildMutationResult("powerpoint_add_slide", new { title, bodyType = parsedBodyType.ToString().ToLowerInvariant() });
+        return BuildMutationResult("powerpoint_add_slide", new { title, bodyType = parsedBodyType.ToString().ToLowerInvariant() }, publicOperationName: "power_point_add_slide", canonicalOperationName: "powerpoint_add_slide");
     }
 
     public string PowerPointInsertSlideAt(string sessionId, int index, string title, string body)
@@ -1397,7 +1586,7 @@ public class OfficeSessionService
             presentationPart.Presentation?.Save();
         }, "power_point_insert_slide_at");
 
-        return BuildMutationResult("powerpoint_insert_slide_at", new { index, title });
+        return BuildMutationResult("powerpoint_insert_slide_at", new { index, title }, publicOperationName: "power_point_insert_slide_at", canonicalOperationName: "powerpoint_insert_slide_at");
     }
 
     public string PowerPointSetSlideTitle(string sessionId, int slideIndex, string title)
@@ -1412,7 +1601,7 @@ public class OfficeSessionService
             GetSlide(slidePart).Save();
         }, "power_point_set_slide_title");
 
-        return BuildMutationResult("powerpoint_set_slide_title", new { slideIndex });
+        return BuildMutationResult("powerpoint_set_slide_title", new { slideIndex }, publicOperationName: "power_point_set_slide_title", canonicalOperationName: "powerpoint_set_slide_title");
     }
 
     public string PowerPointSetSlideBody(string sessionId, int slideIndex, string body, string bodyType = "text")
@@ -1428,7 +1617,7 @@ public class OfficeSessionService
             GetSlide(slidePart).Save();
         }, "power_point_set_slide_body");
 
-        return BuildMutationResult("powerpoint_set_slide_body", new { slideIndex, bodyType = parsedBodyType.ToString().ToLowerInvariant() });
+        return BuildMutationResult("powerpoint_set_slide_body", new { slideIndex, bodyType = parsedBodyType.ToString().ToLowerInvariant() }, publicOperationName: "power_point_set_slide_body", canonicalOperationName: "powerpoint_set_slide_body");
     }
 
     public string PowerPointReorderSlide(string sessionId, int fromIndex, int toIndex)
@@ -1466,7 +1655,7 @@ public class OfficeSessionService
             GetPresentationPart(presentation).Presentation?.Save();
         }, "power_point_reorder_slide");
 
-        return BuildMutationResult("powerpoint_reorder_slide", new { fromIndex, toIndex }, fromIndex != toIndex);
+        return BuildMutationResult("powerpoint_reorder_slide", new { fromIndex, toIndex }, fromIndex != toIndex, publicOperationName: "power_point_reorder_slide", canonicalOperationName: "powerpoint_reorder_slide");
     }
 
     public string PowerPointDeleteSlide(string sessionId, int slideIndex)
@@ -1491,7 +1680,7 @@ public class OfficeSessionService
             presentationPart.Presentation?.Save();
         }, "power_point_delete_slide");
 
-        return BuildMutationResult("powerpoint_delete_slide", new { slideIndex });
+        return BuildMutationResult("powerpoint_delete_slide", new { slideIndex }, publicOperationName: "power_point_delete_slide", canonicalOperationName: "powerpoint_delete_slide");
     }
 
     public string PowerPointSetSlideNotes(string sessionId, int slideIndex, string notes)
@@ -1506,7 +1695,7 @@ public class OfficeSessionService
             notesSlidePart.NotesSlide?.Save();
         }, "power_point_set_slide_notes");
 
-        return BuildMutationResult("powerpoint_set_slide_notes", new { slideIndex });
+        return BuildMutationResult("powerpoint_set_slide_notes", new { slideIndex }, publicOperationName: "power_point_set_slide_notes", canonicalOperationName: "powerpoint_set_slide_notes");
     }
 
     public string PowerPointGetSlideNotes(string sessionId, int slideIndex)
@@ -2371,12 +2560,19 @@ public class OfficeSessionService
             {
                 var reference = paragraphs.FirstOrDefault(x => ReferenceEquals(x.Paragraph, paragraph));
                 var headingLevel = GetHeadingLevel(paragraph);
+                var numbering = paragraph.ParagraphProperties?.NumberingProperties;
+                var numberingId = numbering?.NumberingId?.Val?.Value;
+                var listLevel = numbering?.NumberingLevelReference?.Val?.Value;
                 elements.Add(new
                 {
                     type = headingLevel.HasValue ? "heading" : "paragraph",
                     bodyParagraphIndex = reference?.BodyParagraphIndex,
                     allParagraphIndex = reference?.AllParagraphIndex,
                     headingLevel,
+                    isListItem = numberingId.HasValue,
+                    listKind = numberingId.HasValue ? (numberingId.Value == 1 ? "numbered" : "bulleted") : string.Empty,
+                    listLevel,
+                    numberingId,
                     text = paragraph.InnerText,
                     preview = TrimPreview(paragraph.InnerText)
                 });
@@ -3140,22 +3336,26 @@ public class OfficeSessionService
 
     private void ExecuteWriteOperation(OfficeSession session, string operationName, Action operation, string? publicOperationName = null)
     {
-        var snapshotPath = CreateSnapshot(session);
+        var writeLock = _sessionWriteLocks.GetOrAdd(session.Id, _ => new object());
+        lock (writeLock)
+        {
+            var snapshotPath = CreateSnapshot(session);
 
-        try
-        {
-            operation();
-            AppendOperationLog(session.Id, operationName, "Operation completed.", publicOperationName);
-        }
-        catch
-        {
-            if (_sessionSnapshots.TryGetValue(session.Id, out var snapshots) && snapshots.Count > 0 && snapshots.Peek() == snapshotPath)
+            try
             {
-                snapshots.Pop();
+                operation();
+                AppendOperationLog(session.Id, operationName, "Operation completed.", publicOperationName);
             }
+            catch
+            {
+                if (_sessionSnapshots.TryGetValue(session.Id, out var snapshots) && snapshots.Count > 0 && snapshots.Peek() == snapshotPath)
+                {
+                    snapshots.Pop();
+                }
 
-            DeleteIfExists(snapshotPath);
-            throw;
+                DeleteIfExists(snapshotPath);
+                throw;
+            }
         }
     }
 
@@ -3170,13 +3370,15 @@ public class OfficeSessionService
         return snapshotPath;
     }
 
-    private static string BuildMutationResult(string operation, object target, bool changed = true)
+    private static string BuildMutationResult(string operation, object target, bool changed = true, string? publicOperationName = null, string? canonicalOperationName = null)
     {
         return JsonSerializer.Serialize(new
         {
             ok = true,
             changed,
             operation,
+            publicOperationName = publicOperationName ?? operation,
+            canonicalOperationName = canonicalOperationName ?? operation,
             target
         });
     }

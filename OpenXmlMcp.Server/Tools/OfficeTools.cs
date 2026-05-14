@@ -85,7 +85,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Applies font style to a paragraph by 1-based index in a DOCX session.")]
-    public void WordSetParagraphStyle(
+    public string WordSetParagraphStyle(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("1-based paragraph index.")] int paragraphIndex,
         [Description("Font family name.")] string fontName,
@@ -95,33 +95,33 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Whether text is italic.")] bool italic,
         [Description("Hex text color without '#', e.g. FF0000.")] string colorHex)
     {
-        officeSessionService.WordSetParagraphStyle(sessionId, paragraphIndex, fontName, fontSize, bold, italic, colorHex);
+        return officeSessionService.WordSetParagraphStyle(sessionId, paragraphIndex, fontName, fontSize, bold, italic, colorHex);
     }
 
     [McpServerTool]
     [Description("Sets spacing for a paragraph by 1-based index in a DOCX session.")]
-    public void WordSetParagraphSpacing(
+    public string WordSetParagraphSpacing(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("1-based paragraph index.")] int paragraphIndex,
         [Description("Spacing before in points.")] int beforePt,
         [Description("Spacing after in points.")] int afterPt,
         [Description("Line spacing multiplier, e.g. 1.15.")] double lineSpacing)
     {
-        officeSessionService.WordSetParagraphSpacing(sessionId, paragraphIndex, beforePt, afterPt, lineSpacing);
+        return officeSessionService.WordSetParagraphSpacing(sessionId, paragraphIndex, beforePt, afterPt, lineSpacing);
     }
 
     [McpServerTool]
     [Description("Applies document-wide paragraph spacing preset in a DOCX session.")]
-    public void WordSetDocumentSpacingPreset(
+    public string WordSetDocumentSpacingPreset(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Preset: compact, normal, comfortable.")] string preset = "normal")
     {
-        officeSessionService.WordSetDocumentSpacingPreset(sessionId, preset);
+        return officeSessionService.WordSetDocumentSpacingPreset(sessionId, preset);
     }
 
     [McpServerTool]
     [Description("Inserts a paragraph after a paragraph containing anchor text.")]
-    public int WordInsertParagraphAfterText(
+    public string WordInsertParagraphAfterText(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Anchor text sequence to search.")] string anchorText,
         [Description("Paragraph text to insert.")] string text,
@@ -133,7 +133,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Inserts inline text immediately after a text sequence match.")]
-    public bool WordInsertTextAfterText(
+    public string WordInsertTextAfterText(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Anchor text sequence to search.")] string anchorText,
         [Description("Text to insert after the anchor.")] string text,
@@ -141,6 +141,15 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Use case-sensitive matching.")] bool matchCase = false)
     {
         return officeSessionService.WordInsertTextAfterText(sessionId, anchorText, text, occurrence, matchCase);
+    }
+
+    [McpServerTool]
+    [Description("Gets style and spacing details for a Word body paragraph by 1-based index.")]
+    public string WordGetParagraphInfo(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based body paragraph index.")] int paragraphIndex)
+    {
+        return officeSessionService.WordGetParagraphInfo(sessionId, paragraphIndex);
     }
 
     [McpServerTool]
@@ -153,22 +162,22 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Applies an existing Word style by style id or style name.")]
-    public void WordApplyStyleByName(
+    public string WordApplyStyleByName(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("1-based paragraph index.")] int paragraphIndex,
         [Description("Style id or style name.")] string styleName)
     {
-        officeSessionService.WordApplyStyleByName(sessionId, paragraphIndex, styleName);
+        return officeSessionService.WordApplyStyleByName(sessionId, paragraphIndex, styleName);
     }
 
     [McpServerTool]
     [Description("Creates or updates a custom Word paragraph style from JSON options.")]
-    public void WordCreateOrUpdateStyle(
+    public string WordCreateOrUpdateStyle(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Custom style display name.")] string styleName,
         [Description("JSON options for style properties.")] string styleJson)
     {
-        officeSessionService.WordCreateOrUpdateStyle(sessionId, styleName, styleJson);
+        return officeSessionService.WordCreateOrUpdateStyle(sessionId, styleName, styleJson);
     }
 
     [McpServerTool]
@@ -183,7 +192,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Replaces text in a DOCX session and returns replacement count.")]
-    public int WordReplaceText(
+    public string WordReplaceText(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Text to find.")] string find,
         [Description("Replacement text.")] string replace,
@@ -194,12 +203,12 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Adds a heading paragraph to a DOCX session.")]
-    public void WordAddHeading(
+    public string WordAddHeading(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Heading level from 1 to 6.")] int level,
         [Description("Heading text.")] string text)
     {
-        officeSessionService.WordAddHeading(sessionId, level, text);
+        return officeSessionService.WordAddHeading(sessionId, level, text);
     }
 
     [McpServerTool]
@@ -280,7 +289,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Applies font style to an XLSX cell.")]
-    public void ExcelSetCellStyle(
+    public string ExcelSetCellStyle(
         [Description("Active XLSX session id.")] string sessionId,
         [Description("Sheet name, e.g. Sheet1.")] string sheetName,
         [Description("Cell reference, e.g. A1.")] string cellReference,
@@ -291,7 +300,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Whether text is italic.")] bool italic,
         [Description("Hex text color without '#', e.g. FF0000.")] string colorHex)
     {
-        officeSessionService.ExcelSetCellStyle(sessionId, sheetName, cellReference, fontName, fontSize, bold, italic, colorHex);
+        return officeSessionService.ExcelSetCellStyle(sessionId, sheetName, cellReference, fontName, fontSize, bold, italic, colorHex);
     }
 
     [McpServerTool]
@@ -312,6 +321,16 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Cell reference, e.g. A1.")] string cellReference)
     {
         return officeSessionService.ExcelGetCellInfo(sessionId, sheetName, cellReference);
+    }
+
+    [McpServerTool]
+    [Description("Gets resolved style details for an XLSX cell.")]
+    public string ExcelGetCellStyle(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName,
+        [Description("Cell reference, e.g. A1.")] string cellReference)
+    {
+        return officeSessionService.ExcelGetCellStyle(sessionId, sheetName, cellReference);
     }
 
     [McpServerTool]
@@ -428,7 +447,7 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Applies font style to a text slot on a slide (slot 0=title, 1=entire body across all body paragraphs).")]
-    public void PowerPointSetTextStyle(
+    public string PowerPointSetTextStyle(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex,
         [Description("Text slot index (0=title, 1=body).")]
@@ -440,7 +459,18 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
         [Description("Whether text is italic.")] bool italic,
         [Description("Hex text color without '#', e.g. FF0000.")] string colorHex)
     {
-        officeSessionService.PowerPointSetTextStyle(sessionId, slideIndex, slot, fontName, fontSize, bold, italic, colorHex);
+        return officeSessionService.PowerPointSetTextStyle(sessionId, slideIndex, slot, fontName, fontSize, bold, italic, colorHex);
+    }
+
+    [McpServerTool]
+    [Description("Gets resolved text style details for a text slot on a slide.")]
+    public string PowerPointGetTextStyle(
+        [Description("Active PPTX session id.")] string sessionId,
+        [Description("1-based slide index.")] int slideIndex,
+        [Description("Text slot index (0=title, 1=body).")]
+        int slot)
+    {
+        return officeSessionService.PowerPointGetTextStyle(sessionId, slideIndex, slot);
     }
 
     [McpServerTool]

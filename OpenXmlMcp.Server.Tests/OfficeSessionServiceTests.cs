@@ -562,9 +562,9 @@ public class OfficeSessionServiceTests
             var sessionId = service.CreateDocument(filePath, "docx");
             service.WordAppendParagraph(sessionId, "alpha beta alpha");
 
-            var count = service.WordReplaceText(sessionId, "alpha", "gamma", matchCase: false);
+            var payload = service.WordReplaceText(sessionId, "alpha", "gamma", matchCase: false);
 
-            Assert.Equal(2, count);
+            Assert.Contains("\"replacementCount\":2", payload, StringComparison.OrdinalIgnoreCase);
             var result = service.FindText(sessionId, "gamma");
             Assert.Contains("\"matchCount\":1", result, StringComparison.OrdinalIgnoreCase);
 
@@ -1390,9 +1390,9 @@ public class OfficeSessionServiceTests
         {
             var sessionId = service.CreateDocument(filePath, "docx");
             service.WordAppendParagraph(sessionId, "Anchor paragraph");
-            var index = service.WordInsertParagraphAfterText(sessionId, "Anchor", "Inserted paragraph");
+            var payload = service.WordInsertParagraphAfterText(sessionId, "Anchor", "Inserted paragraph");
 
-            Assert.Equal(2, index);
+            Assert.Contains("\"insertedIndex\":2", payload, StringComparison.OrdinalIgnoreCase);
             var find = service.FindText(sessionId, "Inserted paragraph");
             Assert.Contains("\"index\":2", find, StringComparison.OrdinalIgnoreCase);
 
@@ -1414,9 +1414,9 @@ public class OfficeSessionServiceTests
         {
             var sessionId = service.CreateDocument(filePath, "docx");
             service.WordAppendParagraph(sessionId, "Hello world");
-            var changed = service.WordInsertTextAfterText(sessionId, "Hello", " dear");
+            var payload = service.WordInsertTextAfterText(sessionId, "Hello", " dear");
 
-            Assert.True(changed);
+            Assert.Contains("\"changed\":true", payload, StringComparison.OrdinalIgnoreCase);
             var find = service.FindText(sessionId, "Hello dear world");
             Assert.Contains("\"matchCount\":1", find, StringComparison.OrdinalIgnoreCase);
 
@@ -1493,6 +1493,77 @@ public class OfficeSessionServiceTests
             Assert.True(doc.RootElement.GetProperty("exists").GetBoolean());
             Assert.Equal("A1+A2", doc.RootElement.GetProperty("formula").GetString());
             Assert.True(doc.RootElement.TryGetProperty("cachedValue", out _));
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordGetParagraphInfo_ReturnsStyleAndSpacingFields()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Info paragraph");
+            service.WordSetParagraphSpacing(sessionId, 1, 4, 10, 1.2);
+
+            var payload = service.WordGetParagraphInfo(sessionId, 1);
+            Assert.Contains("\"paragraphIndex\":1", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"spacingBeforeTwips\"", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelGetCellStyle_ReturnsResolvedFontFields()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelSetCellStyle(sessionId, "Sheet1", "A1", "Calibri", 12, true, false, "FF0000");
+
+            var payload = service.ExcelGetCellStyle(sessionId, "Sheet1", "A1");
+            Assert.Contains("\"exists\":true", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"fontName\"", payload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void PowerPointGetTextStyle_ReturnsFontFields()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("pptx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "pptx");
+            service.PowerPointAddSlide(sessionId, "Title", "Body");
+            service.PowerPointSetTextStyle(sessionId, 1, 0, "Calibri", 28, true, false, "112233");
+
+            var payload = service.PowerPointGetTextStyle(sessionId, 1, 0);
+            Assert.Contains("\"slideIndex\":1", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"fontSize\":28", payload, StringComparison.OrdinalIgnoreCase);
 
             service.CloseDocument(sessionId);
         }
