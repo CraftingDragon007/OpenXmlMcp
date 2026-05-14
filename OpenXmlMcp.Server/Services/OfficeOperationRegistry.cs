@@ -52,6 +52,7 @@ internal static class OfficeOperationRegistry
             new("excel_set_cell_value", OfficeDocumentType.Excel, true),
             new("excel_set_cell_style", OfficeDocumentType.Excel, true),
             new("excel_get_cell_value", OfficeDocumentType.Excel, false),
+            new("excel_get_cell_info", OfficeDocumentType.Excel, false),
             new("excel_get_used_range", OfficeDocumentType.Excel, false),
             new("excel_set_range_values", OfficeDocumentType.Excel, true),
             new("excel_set_formula", OfficeDocumentType.Excel, true),

@@ -1451,4 +1451,54 @@ public class OfficeSessionServiceTests
             DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void MutationOperations_ReturnStructuredPayload()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var payload = service.WordAppendParagraph(sessionId, "Payload check");
+
+            using var doc = JsonDocument.Parse(payload);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal("word_append_paragraph", doc.RootElement.GetProperty("operation").GetString());
+            Assert.True(doc.RootElement.GetProperty("changed").GetBoolean());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void ExcelGetCellInfo_ReturnsFormulaAndCachedValueFields()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("xlsx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "xlsx");
+            service.ExcelSetFormula(sessionId, "Sheet1", "B2", "=A1+A2");
+
+            var payload = service.ExcelGetCellInfo(sessionId, "Sheet1", "B2");
+            using var doc = JsonDocument.Parse(payload);
+
+            Assert.True(doc.RootElement.GetProperty("exists").GetBoolean());
+            Assert.Equal("A1+A2", doc.RootElement.GetProperty("formula").GetString());
+            Assert.True(doc.RootElement.TryGetProperty("cachedValue", out _));
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
 }

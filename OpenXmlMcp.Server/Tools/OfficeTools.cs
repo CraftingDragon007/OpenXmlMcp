@@ -26,18 +26,18 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Closes an open office session.")]
-    public void CloseDocument(
+    public string CloseDocument(
         [Description("Active session id.")] string sessionId)
     {
-        officeSessionService.CloseDocument(sessionId);
+        return officeSessionService.CloseDocument(sessionId);
     }
 
     [McpServerTool]
     [Description("Saves the active office session.")]
-    public void SaveDocument(
+    public string SaveDocument(
         [Description("Active session id.")] string sessionId)
     {
-        officeSessionService.SaveDocument(sessionId);
+        return officeSessionService.SaveDocument(sessionId);
     }
 
     [McpServerTool]
@@ -76,11 +76,11 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Appends a paragraph to a DOCX session.")]
-    public void WordAppendParagraph(
+    public string WordAppendParagraph(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Paragraph text to append.")] string text)
     {
-        officeSessionService.WordAppendParagraph(sessionId, text);
+        return officeSessionService.WordAppendParagraph(sessionId, text);
     }
 
     [McpServerTool]
@@ -173,12 +173,12 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Inserts a paragraph at a 1-based index in a DOCX session.")]
-    public void WordInsertParagraphAt(
+    public string WordInsertParagraphAt(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("1-based paragraph insertion index.")] int index,
         [Description("Paragraph text.")] string text)
     {
-        officeSessionService.WordInsertParagraphAt(sessionId, index, text);
+        return officeSessionService.WordInsertParagraphAt(sessionId, index, text);
     }
 
     [McpServerTool]
@@ -204,56 +204,56 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Adds a bulleted list to a DOCX session using newline-separated items.")]
-    public void WordAddBulletedList(
+    public string WordAddBulletedList(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Newline-separated bullet lines.")] string lines,
         [Description("Bullet style (default: disc).")]
         string bulletStyle = "disc")
     {
-        officeSessionService.WordAddBulletedList(sessionId, lines, bulletStyle);
+        return officeSessionService.WordAddBulletedList(sessionId, lines, bulletStyle);
     }
 
     [McpServerTool]
     [Description("Adds a numbered list to a DOCX session using newline-separated items.")]
-    public void WordAddNumberedList(
+    public string WordAddNumberedList(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Newline-separated numbered lines.")] string lines,
         [Description("Number style (default: decimal-dot).")]
         string numberStyle = "decimal-dot")
     {
-        officeSessionService.WordAddNumberedList(sessionId, lines, numberStyle);
+        return officeSessionService.WordAddNumberedList(sessionId, lines, numberStyle);
     }
 
     [McpServerTool]
     [Description("Adds a structured mixed list (numbered/bulleted, nested) from JSON items.")]
-    public void WordAddStructuredList(
+    public string WordAddStructuredList(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("JSON array of items: text, level, kind, optional bulletStyle/numberStyle.")]
         string itemsJson)
     {
-        officeSessionService.WordAddStructuredList(sessionId, itemsJson);
+        return officeSessionService.WordAddStructuredList(sessionId, itemsJson);
     }
 
     [McpServerTool]
     [Description("Adds a plain table to a DOCX session.")]
-    public void WordAddTable(
+    public string WordAddTable(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Number of rows.")] int rows,
         [Description("Number of columns.")] int columns)
     {
-        officeSessionService.WordAddTable(sessionId, rows, columns);
+        return officeSessionService.WordAddTable(sessionId, rows, columns);
     }
 
     [McpServerTool]
     [Description("Sets text in a Word table cell by 1-based table/row/column indexes.")]
-    public void WordSetTableCell(
+    public string WordSetTableCell(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("1-based table index in document body.")] int tableIndex,
         [Description("1-based row index within the table.")] int rowIndex,
         [Description("1-based column index within the row.")] int columnIndex,
         [Description("Cell text value.")] string text)
     {
-        officeSessionService.WordSetTableCell(sessionId, tableIndex, rowIndex, columnIndex, text);
+        return officeSessionService.WordSetTableCell(sessionId, tableIndex, rowIndex, columnIndex, text);
     }
 
     [McpServerTool]
@@ -269,13 +269,13 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Sets a string value in an XLSX cell.")]
-    public void ExcelSetCellValue(
+    public string ExcelSetCellValue(
         [Description("Active XLSX session id.")] string sessionId,
         [Description("Sheet name, e.g. Sheet1.")] string sheetName,
         [Description("Cell reference, e.g. A1.")] string cellReference,
         [Description("Cell value.")] string value)
     {
-        officeSessionService.ExcelSetCellValue(sessionId, sheetName, cellReference, value);
+        return officeSessionService.ExcelSetCellValue(sessionId, sheetName, cellReference, value);
     }
 
     [McpServerTool]
@@ -305,6 +305,16 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Gets detailed cell info from an XLSX session, including formula and cached value.")]
+    public string ExcelGetCellInfo(
+        [Description("Active XLSX session id.")] string sessionId,
+        [Description("Sheet name, e.g. Sheet1.")] string sheetName,
+        [Description("Cell reference, e.g. A1.")] string cellReference)
+    {
+        return officeSessionService.ExcelGetCellInfo(sessionId, sheetName, cellReference);
+    }
+
+    [McpServerTool]
     [Description("Returns the used range bounds for an XLSX worksheet.")]
     public string ExcelGetUsedRange(
         [Description("Active XLSX session id.")] string sessionId,
@@ -315,24 +325,24 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Sets a 2D range of values in an XLSX sheet. valuesJson must be strict JSON array-of-arrays (double-quoted strings). Strings starting with '=' are stored as formulas.")]
-    public void ExcelSetRangeValues(
+    public string ExcelSetRangeValues(
         [Description("Active XLSX session id.")] string sessionId,
         [Description("Sheet name, e.g. Sheet1.")] string sheetName,
         [Description("Top-left start cell, e.g. A1.")] string startCell,
         [Description("JSON array of arrays for values.")] string valuesJson)
     {
-        officeSessionService.ExcelSetRangeValues(sessionId, sheetName, startCell, valuesJson);
+        return officeSessionService.ExcelSetRangeValues(sessionId, sheetName, startCell, valuesJson);
     }
 
     [McpServerTool]
     [Description("Sets a formula in an XLSX cell.")]
-    public void ExcelSetFormula(
+    public string ExcelSetFormula(
         [Description("Active XLSX session id.")] string sessionId,
         [Description("Sheet name, e.g. Sheet1.")] string sheetName,
         [Description("Cell reference, e.g. C1.")] string cellReference,
         [Description("Formula with or without leading '='.")] string formula)
     {
-        officeSessionService.ExcelSetFormula(sessionId, sheetName, cellReference, formula);
+        return officeSessionService.ExcelSetFormula(sessionId, sheetName, cellReference, formula);
     }
 
     [McpServerTool]
@@ -347,64 +357,64 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Adds a new worksheet to an XLSX session.")]
-    public void ExcelAddWorksheet(
+    public string ExcelAddWorksheet(
         [Description("Active XLSX session id.")] string sessionId,
         [Description("New sheet name.")] string sheetName)
     {
-        officeSessionService.ExcelAddWorksheet(sessionId, sheetName);
+        return officeSessionService.ExcelAddWorksheet(sessionId, sheetName);
     }
 
     [McpServerTool]
     [Description("Adds a slide to a PPTX session. bodyType can be text, bulleted, or numbered.")]
-    public void PowerPointAddSlide(
+    public string PowerPointAddSlide(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("Slide title.")] string title,
         [Description("Slide body text.")] string body,
         [Description("Body type: text, bulleted, numbered.")] string bodyType = "text")
     {
-        officeSessionService.PowerPointAddSlide(sessionId, title, body, bodyType);
+        return officeSessionService.PowerPointAddSlide(sessionId, title, body, bodyType);
     }
 
     [McpServerTool]
     [Description("Inserts a slide at a 1-based index in a PPTX session.")]
-    public void PowerPointInsertSlideAt(
+    public string PowerPointInsertSlideAt(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based insertion index.")] int index,
         [Description("Slide title.")] string title,
         [Description("Slide body text.")] string body)
     {
-        officeSessionService.PowerPointInsertSlideAt(sessionId, index, title, body);
+        return officeSessionService.PowerPointInsertSlideAt(sessionId, index, title, body);
     }
 
     [McpServerTool]
     [Description("Sets the title text for a slide by 1-based index.")]
-    public void PowerPointSetSlideTitle(
+    public string PowerPointSetSlideTitle(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex,
         [Description("New title text.")] string title)
     {
-        officeSessionService.PowerPointSetSlideTitle(sessionId, slideIndex, title);
+        return officeSessionService.PowerPointSetSlideTitle(sessionId, slideIndex, title);
     }
 
     [McpServerTool]
     [Description("Sets the body content for a slide by 1-based index. bodyType can be text, bulleted, or numbered.")]
-    public void PowerPointSetSlideBody(
+    public string PowerPointSetSlideBody(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex,
         [Description("New body text.")] string body,
         [Description("Body type: text, bulleted, numbered.")] string bodyType = "text")
     {
-        officeSessionService.PowerPointSetSlideBody(sessionId, slideIndex, body, bodyType);
+        return officeSessionService.PowerPointSetSlideBody(sessionId, slideIndex, body, bodyType);
     }
 
     [McpServerTool]
     [Description("Sets hidden speaker notes for a slide by 1-based index.")]
-    public void PowerPointSetSlideNotes(
+    public string PowerPointSetSlideNotes(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex,
         [Description("Speaker notes text.")] string notes)
     {
-        officeSessionService.PowerPointSetSlideNotes(sessionId, slideIndex, notes);
+        return officeSessionService.PowerPointSetSlideNotes(sessionId, slideIndex, notes);
     }
 
     [McpServerTool]
@@ -435,31 +445,31 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Moves a slide from one 1-based index to another.")]
-    public void PowerPointReorderSlide(
+    public string PowerPointReorderSlide(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based source slide index.")] int fromIndex,
         [Description("1-based destination slide index.")] int toIndex)
     {
-        officeSessionService.PowerPointReorderSlide(sessionId, fromIndex, toIndex);
+        return officeSessionService.PowerPointReorderSlide(sessionId, fromIndex, toIndex);
     }
 
     [McpServerTool]
     [Description("Deletes a slide by 1-based index.")]
-    public void PowerPointDeleteSlide(
+    public string PowerPointDeleteSlide(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("1-based slide index.")] int slideIndex)
     {
-        officeSessionService.PowerPointDeleteSlide(sessionId, slideIndex);
+        return officeSessionService.PowerPointDeleteSlide(sessionId, slideIndex);
     }
 
     [McpServerTool]
     [Description("Adds a bullet style slide to a PPTX session. Provide newline-separated bullet text.")]
-    public void PowerPointAddBulletSlide(
+    public string PowerPointAddBulletSlide(
         [Description("Active PPTX session id.")] string sessionId,
         [Description("Slide title.")] string title,
         [Description("Newline-separated bullet lines.")] string bulletLines)
     {
-        officeSessionService.PowerPointAddBulletSlide(sessionId, title, bulletLines);
+        return officeSessionService.PowerPointAddBulletSlide(sessionId, title, bulletLines);
     }
 
     [McpServerTool]
@@ -473,11 +483,11 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Applies a cross-suite style preset to the active document session.")]
-    public void ApplyStylePreset(
+    public string ApplyStylePreset(
         [Description("Active session id.")] string sessionId,
         [Description("Style preset name, e.g. default or neutral.")] string preset = "default")
     {
-        officeSessionService.ApplyStylePreset(sessionId, preset);
+        return officeSessionService.ApplyStylePreset(sessionId, preset);
     }
 
     [McpServerTool]
@@ -490,12 +500,12 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Applies text presets such as title or subtitle.")]
-    public void ApplyTextPreset(
+    public string ApplyTextPreset(
         [Description("Active session id.")] string sessionId,
         [Description("Text preset: default, title, subtitle.")] string preset,
         [Description("Target index: paragraph/slide index depending on document type.")] int targetIndex = 1)
     {
-        officeSessionService.ApplyTextPreset(sessionId, preset, targetIndex);
+        return officeSessionService.ApplyTextPreset(sessionId, preset, targetIndex);
     }
 
     [McpServerTool]
@@ -508,9 +518,9 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
 
     [McpServerTool]
     [Description("Restores the previous checkpoint for the active session.")]
-    public void UndoLastChange(
+    public string UndoLastChange(
         [Description("Active session id.")] string sessionId)
     {
-        officeSessionService.UndoLastChange(sessionId);
+        return officeSessionService.UndoLastChange(sessionId);
     }
 }

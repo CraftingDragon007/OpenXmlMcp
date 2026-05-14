@@ -12,7 +12,7 @@ It provides both low-level document helpers and high-level session-based editing
 - Undo/checkpoint history for write operations
 - Cross-suite style presets and text presets
 - Rich Word tooling for headings, spacing, lists, anchor-based insertion, and custom styles
-- Excel helpers for ranges, formulas, and cell styling
+- Excel helpers for ranges, formulas, cell styling, and cell inspection
 - PowerPoint helpers for slide management and text styling
 
 ## Tool Categories
@@ -56,7 +56,7 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 
 ## Excel
 
-- Data: `excel_set_cell_value`, `excel_get_cell_value`, `excel_set_range_values`, `excel_get_used_range`
+- Data: `excel_set_cell_value`, `excel_get_cell_value`, `excel_get_cell_info`, `excel_set_range_values`, `excel_get_used_range`
 - Formula: `excel_set_formula`, `excel_get_formula`
 - Structure: `excel_add_worksheet`
 - Formatting: `excel_set_cell_style`
@@ -82,6 +82,9 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 - Operations are validated against the active session's document type.
 - Batch failures include `operation`, `index`, `errorCode`, and `error`.
 - PPTX defaults are generated programmatically (no embedded template dependency).
+- Mutating tools return a structured result payload (`ok`, `changed`, `operation`, `target`).
+
+Excel note: formulas are stored and retrievable, but not calculated server-side; formula cells may not have a cached value until recalculated by a spreadsheet client.
 
 ## Indexing And Structure
 
