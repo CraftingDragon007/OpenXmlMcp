@@ -139,6 +139,26 @@ internal static class OfficeBatchDispatcher
                     payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
                     payload["matchCase"]?.GetValue<bool>() ?? true,
                     payload["maxMatches"]?.GetValue<int>() ?? 5000),
+            ["word_insert_table_of_contents"] = static (svc, sessionId, payload) =>
+                _ = svc.WordInsertTableOfContents(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? 1,
+                    payload["minLevel"]?.GetValue<int>() ?? 1,
+                    payload["maxLevel"]?.GetValue<int>() ?? 3),
+            ["word_insert_page_break_after"] = static (svc, sessionId, payload) =>
+                _ = svc.WordInsertPageBreakAfter(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'paragraphIndex'.")),
+            ["word_set_header"] = static (svc, sessionId, payload) =>
+                _ = svc.WordSetHeader(
+                    sessionId,
+                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."),
+                    payload["sectionIndex"]?.GetValue<int>() ?? 1),
+            ["word_set_footer"] = static (svc, sessionId, payload) =>
+                _ = svc.WordSetFooter(
+                    sessionId,
+                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."),
+                    payload["sectionIndex"]?.GetValue<int>() ?? 1),
             ["word_insert_after_heading"] = static (svc, sessionId, payload) =>
                 _ = svc.WordInsertAfterHeading(
                     sessionId,

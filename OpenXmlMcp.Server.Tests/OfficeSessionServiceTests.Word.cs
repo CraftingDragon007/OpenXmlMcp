@@ -766,6 +766,97 @@ public partial class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordInsertTableOfContents_InsertsFieldCode()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddHeading(sessionId, 1, "Chapter One");
+            service.WordAddHeading(sessionId, 2, "Section 1.1");
+
+            var result = service.WordInsertTableOfContents(sessionId, 1, minLevel: 1, maxLevel: 3);
+
+            Assert.Contains("\"ok\":true", result, StringComparison.OrdinalIgnoreCase);
+
+            // Verify TOC field is present in document XML
+            service.CloseDocument(sessionId);
+
+            using var zipFile = System.IO.Compression.ZipFile.OpenRead(filePath);
+            var docEntry = zipFile.GetEntry("word/document.xml");
+            Assert.NotNull(docEntry);
+            using var stream = docEntry!.Open();
+            using var reader = new System.IO.StreamReader(stream);
+            var xml = reader.ReadToEnd();
+            Assert.Contains("TOC", xml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordInsertPageBreakAfter_InsertsBreak()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Before break");
+            service.WordAppendParagraph(sessionId, "After break");
+
+            var result = service.WordInsertPageBreakAfter(sessionId, 1);
+            Assert.Contains("\"ok\":true", result, StringComparison.OrdinalIgnoreCase);
+
+            // Body should now have 3 paragraphs (before, break, after)
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"bodyParagraphCount\":3", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordSetHeader_AndSetFooter_WritesParts()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Body text");
+
+            var hr = service.WordSetHeader(sessionId, "My Document Header");
+            var fr = service.WordSetFooter(sessionId, "Page {PAGE} of {NUMPAGES}");
+
+            Assert.Contains("\"ok\":true", hr, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"ok\":true", fr, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+
+            // Verify header and footer parts exist in DOCX zip
+            using var zipFile = System.IO.Compression.ZipFile.OpenRead(filePath);
+            var entries = zipFile.Entries.Select(e => e.FullName).ToList();
+            Assert.Contains(entries, e => e.StartsWith("word/header", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(entries, e => e.StartsWith("word/footer", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void WordApplyTableStyle_SetsStyleOnTable()
     {
         var service = OfficeSessionServiceTestHelpers.CreateService();

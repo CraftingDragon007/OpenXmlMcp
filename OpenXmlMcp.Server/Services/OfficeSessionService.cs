@@ -360,6 +360,18 @@ public class OfficeSessionService(
     public string WordReplaceSection(string sessionId, string headingText, string replacementJson, int occurrence = 1, bool matchCase = false)
         => wordService.ReplaceSection(sessionId, headingText, replacementJson, occurrence, matchCase);
 
+    public string WordInsertTableOfContents(string sessionId, int paragraphIndex, int minLevel = 1, int maxLevel = 3)
+        => wordService.InsertTableOfContents(sessionId, paragraphIndex, minLevel, maxLevel);
+
+    public string WordInsertPageBreakAfter(string sessionId, int paragraphIndex)
+        => wordService.InsertPageBreakAfter(sessionId, paragraphIndex);
+
+    public string WordSetHeader(string sessionId, string text, int sectionIndex = 1)
+        => wordService.SetHeader(sessionId, text, sectionIndex);
+
+    public string WordSetFooter(string sessionId, string text, int sectionIndex = 1)
+        => wordService.SetFooter(sessionId, text, sectionIndex);
+
     public string WordApplyTableStyle(string sessionId, int tableIndex, string styleName)
         => wordService.ApplyTableStyle(sessionId, tableIndex, styleName);
 

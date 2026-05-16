@@ -205,6 +205,46 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Inserts a Word TOC field at a 1-based paragraph index. Word updates the TOC on open.")]
+    public string WordInsertTableOfContents(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based paragraph index at which to insert the TOC.")] int paragraphIndex,
+        [Description("Minimum heading level to include (default 1).")] int minLevel = 1,
+        [Description("Maximum heading level to include (default 3).")] int maxLevel = 3)
+    {
+        return officeSessionService.WordInsertTableOfContents(sessionId, paragraphIndex, minLevel, maxLevel);
+    }
+
+    [McpServerTool]
+    [Description("Inserts a page break after a body paragraph by 1-based index.")]
+    public string WordInsertPageBreakAfter(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based body paragraph index after which to insert the page break.")] int paragraphIndex)
+    {
+        return officeSessionService.WordInsertPageBreakAfter(sessionId, paragraphIndex);
+    }
+
+    [McpServerTool]
+    [Description("Sets the document header text. Use {PAGE} and {NUMPAGES} tokens for page numbers.")]
+    public string WordSetHeader(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Header text. Use {PAGE} and {NUMPAGES} for page number fields.")] string text,
+        [Description("Section index (default 1).")] int sectionIndex = 1)
+    {
+        return officeSessionService.WordSetHeader(sessionId, text, sectionIndex);
+    }
+
+    [McpServerTool]
+    [Description("Sets the document footer text. Use {PAGE} and {NUMPAGES} tokens for page numbers.")]
+    public string WordSetFooter(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Footer text. Use {PAGE} and {NUMPAGES} for page number fields.")] string text,
+        [Description("Section index (default 1).")] int sectionIndex = 1)
+    {
+        return officeSessionService.WordSetFooter(sessionId, text, sectionIndex);
+    }
+
+    [McpServerTool]
     [Description("Inserts a paragraph immediately after a heading containing the given text.")]
     public string WordInsertAfterHeading(
         [Description("Active DOCX session id.")] string sessionId,

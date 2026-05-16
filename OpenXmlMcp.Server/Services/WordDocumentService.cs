@@ -1145,6 +1145,214 @@ public class WordDocumentService(SessionManager sessionManager)
             new { headingText, occurrence, removedCount, insertedCount });
     }
 
+    public string InsertTableOfContents(string sessionId, int paragraphIndex, int minLevel = 1, int maxLevel = 3)
+    {
+        if (minLevel < 1 || minLevel > 9) throw new InvalidOperationException("minLevel must be between 1 and 9.");
+        if (maxLevel < 1 || maxLevel > 9) throw new InvalidOperationException("maxLevel must be between 1 and 9.");
+        if (maxLevel < minLevel) throw new InvalidOperationException("maxLevel must be >= minLevel.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_insert_table_of_contents", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+
+            if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count + 1)
+            {
+                throw new InvalidOperationException($"Paragraph index {paragraphIndex} is out of range. Valid range is 1..{paragraphs.Count + 1}.");
+            }
+
+            // Build TOC field code: TOC \o "1-3" \h \z \u
+            var levelRange = $"{minLevel}-{maxLevel}";
+            var fieldCode = $" TOC \\o \"{levelRange}\" \\h \\z \\u ";
+
+            // A TOC is inserted as a paragraph containing a complex field: fldChar begin → instrText → fldChar separate → fldChar end
+            var tocParagraph = new W.Paragraph(
+                new W.ParagraphProperties(new W.ParagraphStyleId { Val = "TOC1" }),
+                new W.Run(new W.RunProperties(new W.RunStyle { Val = "TOCHyperlink" }),
+                    new W.FieldChar { FieldCharType = W.FieldCharValues.Begin, Dirty = true }),
+                new W.Run(new W.RunProperties(new W.RunStyle { Val = "TOCHyperlink" }),
+                    new W.FieldCode(fieldCode) { Space = SpaceProcessingModeValues.Preserve }),
+                new W.Run(new W.RunProperties(new W.RunStyle { Val = "TOCHyperlink" }),
+                    new W.FieldChar { FieldCharType = W.FieldCharValues.Separate }),
+                new W.Run(new W.Text("(Right-click to update field)") { Space = SpaceProcessingModeValues.Preserve }),
+                new W.Run(new W.RunProperties(new W.RunStyle { Val = "TOCHyperlink" }),
+                    new W.FieldChar { FieldCharType = W.FieldCharValues.End }));
+
+            if (paragraphIndex > paragraphs.Count)
+            {
+                body.Append(tocParagraph);
+            }
+            else
+            {
+                paragraphs[paragraphIndex - 1].InsertBeforeSelf(tocParagraph);
+            }
+
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_insert_table_of_contents", new { paragraphIndex, minLevel, maxLevel });
+    }
+
+    public string InsertPageBreakAfter(string sessionId, int paragraphIndex)
+    {
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_insert_page_break_after", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+            if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
+            {
+                throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
+            }
+
+            var breakParagraph = new W.Paragraph(
+                new W.Run(new W.Break { Type = W.BreakValues.Page }));
+            paragraphs[paragraphIndex - 1].InsertAfterSelf(breakParagraph);
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_insert_page_break_after", new { paragraphIndex });
+    }
+
+    public string SetHeader(string sessionId, string text, int sectionIndex = 1)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_set_header", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+
+            var headerPart = mainPart.HeaderParts.FirstOrDefault() ?? mainPart.AddNewPart<HeaderPart>();
+            headerPart.Header = new Header(BuildHeaderFooterParagraph(text));
+            headerPart.Header.Save();
+
+            var sectionProps = mainPart.Document?.Body?.Elements<W.SectionProperties>().FirstOrDefault()
+                ?? mainPart.Document?.Body?.AppendChild(new W.SectionProperties());
+            if (sectionProps is null) throw new InvalidOperationException("Could not access section properties.");
+
+            // Remove existing header references, then add new one
+            sectionProps.Elements<W.HeaderReference>().ToList().ForEach(r => r.Remove());
+            sectionProps.Append(new W.HeaderReference
+            {
+                Type = W.HeaderFooterValues.Default,
+                Id = mainPart.GetIdOfPart(headerPart)
+            });
+
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_set_header", new { sectionIndex });
+    }
+
+    public string SetFooter(string sessionId, string text, int sectionIndex = 1)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_set_footer", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+
+            var footerPart = mainPart.FooterParts.FirstOrDefault() ?? mainPart.AddNewPart<FooterPart>();
+            footerPart.Footer = new Footer(BuildHeaderFooterParagraph(text));
+            footerPart.Footer.Save();
+
+            var sectionProps = mainPart.Document?.Body?.Elements<W.SectionProperties>().FirstOrDefault()
+                ?? mainPart.Document?.Body?.AppendChild(new W.SectionProperties());
+            if (sectionProps is null) throw new InvalidOperationException("Could not access section properties.");
+
+            sectionProps.Elements<W.FooterReference>().ToList().ForEach(r => r.Remove());
+            sectionProps.Append(new W.FooterReference
+            {
+                Type = W.HeaderFooterValues.Default,
+                Id = mainPart.GetIdOfPart(footerPart)
+            });
+
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_set_footer", new { sectionIndex });
+    }
+
+    /// <summary>
+    /// Builds a paragraph for a header or footer, substituting {PAGE} and {NUMPAGES} tokens with Word field codes.
+    /// </summary>
+    private static W.Paragraph BuildHeaderFooterParagraph(string text)
+    {
+        var para = new W.Paragraph();
+        var pPr = new W.ParagraphProperties(new W.ParagraphStyleId { Val = "Header" });
+        para.Append(pPr);
+
+        // Split text on known tokens and build runs + field codes
+        var tokens = SplitOnTokens(text, ["{PAGE}", "{NUMPAGES}"]);
+        foreach (var token in tokens)
+        {
+            switch (token)
+            {
+                case "{PAGE}":
+                    para.Append(BuildSimpleFieldRun("PAGE"));
+                    break;
+                case "{NUMPAGES}":
+                    para.Append(BuildSimpleFieldRun("NUMPAGES"));
+                    break;
+                default:
+                    if (!string.IsNullOrEmpty(token))
+                    {
+                        para.Append(new W.Run(new W.Text(token) { Space = SpaceProcessingModeValues.Preserve }));
+                    }
+                    break;
+            }
+        }
+
+        return para;
+    }
+
+    private static IEnumerable<string> SplitOnTokens(string text, string[] tokens)
+    {
+        var parts = new List<string>();
+        var remaining = text;
+        while (remaining.Length > 0)
+        {
+            var earliest = tokens
+                .Select(t => new { token = t, index = remaining.IndexOf(t, StringComparison.Ordinal) })
+                .Where(x => x.index >= 0)
+                .OrderBy(x => x.index)
+                .FirstOrDefault();
+
+            if (earliest is null)
+            {
+                parts.Add(remaining);
+                break;
+            }
+
+            if (earliest.index > 0)
+            {
+                parts.Add(remaining[..earliest.index]);
+            }
+
+            parts.Add(earliest.token);
+            remaining = remaining[(earliest.index + earliest.token.Length)..];
+        }
+
+        return parts;
+    }
+
+    private static W.Run[] BuildSimpleFieldRun(string fieldName)
+    {
+        return
+        [
+            new W.Run(new W.FieldChar { FieldCharType = W.FieldCharValues.Begin }),
+            new W.Run(new W.FieldCode($" {fieldName} ") { Space = SpaceProcessingModeValues.Preserve }),
+            new W.Run(new W.FieldChar { FieldCharType = W.FieldCharValues.Separate }),
+            new W.Run(new W.Text("0") { Space = SpaceProcessingModeValues.Preserve }),
+            new W.Run(new W.FieldChar { FieldCharType = W.FieldCharValues.End })
+        ];
+    }
+
     public string ListParagraphRuns(string sessionId, int paragraphIndex)
     {
         var session = sessionManager.GetSession(sessionId);
