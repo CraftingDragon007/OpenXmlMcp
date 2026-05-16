@@ -265,6 +265,41 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Applies a built-in or custom table style to a Word table by 1-based index.")]
+    public string WordApplyTableStyle(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("Table style name, e.g. Table Grid, Light Shading, Table Normal.")] string styleName)
+    {
+        return officeSessionService.WordApplyTableStyle(sessionId, tableIndex, styleName);
+    }
+
+    [McpServerTool]
+    [Description("Formats the header row of a Word table: bold, shading fill, font, color.")]
+    public string WordFormatTableHeaderRow(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("Whether to bold the header row text.")] bool bold = true,
+        [Description("Hex background fill for header cells without '#', e.g. D9EAF7.")] string? shadingFill = null,
+        [Description("Font family name for header row.")] string? fontName = null,
+        [Description("Hex text color without '#', e.g. FFFFFF.")] string? colorHex = null)
+    {
+        return officeSessionService.WordFormatTableHeaderRow(sessionId, tableIndex, bold, shadingFill, fontName, colorHex);
+    }
+
+    [McpServerTool]
+    [Description("Fills a Word table with 2D values from a JSON array-of-arrays. Row and column indexes are 1-based.")]
+    public string WordSetTableValues(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("JSON array of arrays with string cell values, e.g. [[\"A\",\"B\"],[\"1\",\"2\"]].")] string valuesJson,
+        [Description("1-based starting row (default 1).")] int startRow = 1,
+        [Description("1-based starting column (default 1).")] int startColumn = 1)
+    {
+        return officeSessionService.WordSetTableValues(sessionId, tableIndex, valuesJson, startRow, startColumn);
+    }
+
+    [McpServerTool]
     [Description("Adds a plain table to a DOCX session.")]
     public string WordAddTable(
         [Description("Active DOCX session id.")] string sessionId,

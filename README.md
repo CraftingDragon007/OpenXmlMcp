@@ -49,7 +49,8 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 ## Word
 
 - Content: `word_append_paragraph`, `word_insert_paragraph_at`, `word_insert_paragraph_after_text`, `word_insert_text_after_text`, `word_replace_text`, `word_add_heading`, `word_add_table`
-- Table cells: `word_set_table_cell`, `word_get_table_cell`
+- Table cells: `word_set_table_cell`, `word_get_table_cell`, `word_set_table_values`
+- Table styling: `word_apply_table_style`, `word_format_table_header_row`
 - Readback: `word_get_paragraph_info`, `word_list_paragraph_runs`
 - Lists: `word_add_bulleted_list`, `word_add_numbered_list`, `word_add_structured_list`
 - Formatting: `word_set_paragraph_style`, `word_set_paragraph_spacing`, `word_set_document_spacing_preset`

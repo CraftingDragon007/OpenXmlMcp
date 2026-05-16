@@ -34,6 +34,7 @@ public class WordDocumentService(SessionManager sessionManager)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var paragraphIndex = -1;
         sessionManager.ExecuteWriteOperation(session, "word_append_paragraph", () =>
         {
             using var document = WordprocessingDocument.Open(session.FilePath, true);
@@ -42,10 +43,11 @@ public class WordDocumentService(SessionManager sessionManager)
             body.AppendChild(new W.Paragraph(new W.Run(new W.Text(text))));
             var paragraph = body.Elements<W.Paragraph>().Last();
             ApplyWordParagraphSpacing(paragraph, DefaultParagraphBeforePt, DefaultParagraphAfterPt, DefaultParagraphLineSpacing);
+            paragraphIndex = body.Elements<W.Paragraph>().Count();
             document.MainDocumentPart!.Document!.Save();
         });
 
-        return SessionManager.BuildMutationResult("word_append_paragraph", new { textPreview = TrimPreview(text) });
+        return SessionManager.BuildMutationResult("word_append_paragraph", new { textPreview = TrimPreview(text), paragraphIndex });
     }
 
     public string SetParagraphStyle(string sessionId, int paragraphIndex, string fontName, int fontSize, bool bold, bool italic, string colorHex)
@@ -304,12 +306,13 @@ public class WordDocumentService(SessionManager sessionManager)
     public string AddHeading(string sessionId, int level, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        if (level < 1 || level > 6)
+        if (level < 1 || level > 9)
         {
-            throw new InvalidOperationException("Heading level must be between 1 and 6.");
+            throw new InvalidOperationException("Heading level must be between 1 and 9.");
         }
 
         var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var paragraphIndex = -1;
         sessionManager.ExecuteWriteOperation(session, "word_add_heading", () =>
         {
             using var document = WordprocessingDocument.Open(session.FilePath, true);
@@ -321,10 +324,177 @@ public class WordDocumentService(SessionManager sessionManager)
             ApplyWordParagraphSpacing(heading, DefaultHeadingBeforePt, DefaultHeadingAfterPt, DefaultHeadingLineSpacing);
 
             body.Append(heading);
+            paragraphIndex = body.Elements<W.Paragraph>().Count();
             document.MainDocumentPart.Document?.Save();
         });
 
-        return SessionManager.BuildMutationResult("word_add_heading", new { level, textPreview = TrimPreview(text) });
+        return SessionManager.BuildMutationResult("word_add_heading", new { level, textPreview = TrimPreview(text), paragraphIndex });
+    }
+
+    public string ApplyTableStyle(string sessionId, int tableIndex, string styleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_apply_table_style", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+
+            var tableProperties = table.Elements<W.TableProperties>().FirstOrDefault();
+            if (tableProperties is null)
+            {
+                tableProperties = new W.TableProperties();
+                table.InsertAt(tableProperties, 0);
+            }
+
+            tableProperties.TableStyle = new W.TableStyle { Val = styleName };
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_apply_table_style", new { tableIndex, styleName });
+    }
+
+    public string FormatTableHeaderRow(string sessionId, int tableIndex, bool bold = true, string? shadingFill = null, string? fontName = null, string? colorHex = null)
+    {
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_format_table_header_row", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+
+            var headerRow = table.Elements<W.TableRow>().FirstOrDefault()
+                ?? throw new InvalidOperationException($"Table {tableIndex} has no rows.");
+
+            // Mark the row as a header row
+            var rowProps = headerRow.Elements<W.TableRowProperties>().FirstOrDefault();
+            if (rowProps is null)
+            {
+                rowProps = new W.TableRowProperties();
+                headerRow.InsertAt(rowProps, 0);
+            }
+
+            if (!rowProps.Elements<W.TableHeader>().Any())
+            {
+                rowProps.Append(new W.TableHeader());
+            }
+
+            // Apply shading and font to each cell
+            foreach (var cell in headerRow.Elements<W.TableCell>())
+            {
+                if (!string.IsNullOrWhiteSpace(shadingFill))
+                {
+                    var cellProps = cell.Elements<W.TableCellProperties>().FirstOrDefault();
+                    if (cellProps is null)
+                    {
+                        cellProps = new W.TableCellProperties();
+                        cell.InsertAt(cellProps, 0);
+                    }
+
+                    cellProps.Shading = new W.Shading
+                    {
+                        Val = W.ShadingPatternValues.Clear,
+                        Fill = shadingFill.TrimStart('#'),
+                        Color = "auto"
+                    };
+                }
+
+                foreach (var para in cell.Elements<W.Paragraph>())
+                {
+                    foreach (var run in para.Elements<W.Run>())
+                    {
+                        run.RunProperties ??= new W.RunProperties();
+                        if (bold)
+                        {
+                            run.RunProperties.Bold = new W.Bold();
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(fontName))
+                        {
+                            run.RunProperties.RunFonts = new W.RunFonts { Ascii = fontName, HighAnsi = fontName, ComplexScript = fontName };
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(colorHex))
+                        {
+                            run.RunProperties.Color = new W.Color { Val = colorHex.TrimStart('#') };
+                        }
+                    }
+
+                    // Also apply to paragraph mark run properties
+                    var pPr = para.ParagraphProperties ??= new W.ParagraphProperties();
+                    pPr.ParagraphMarkRunProperties ??= new W.ParagraphMarkRunProperties();
+                    if (bold && !pPr.ParagraphMarkRunProperties.Elements<W.Bold>().Any())
+                    {
+                        pPr.ParagraphMarkRunProperties.Append(new W.Bold());
+                    }
+                }
+            }
+
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_format_table_header_row", new { tableIndex, bold, shadingFill, fontName, colorHex });
+    }
+
+    public string SetTableValues(string sessionId, int tableIndex, string valuesJson, int startRow = 1, int startColumn = 1)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(valuesJson);
+        if (tableIndex < 1) throw new InvalidOperationException("tableIndex must be >= 1.");
+        if (startRow < 1) throw new InvalidOperationException("startRow must be >= 1.");
+        if (startColumn < 1) throw new InvalidOperationException("startColumn must be >= 1.");
+
+        var rows = JsonSerializer.Deserialize<List<List<JsonElement>>>(valuesJson)
+            ?? throw new InvalidOperationException("valuesJson must be a JSON array of arrays.");
+        if (rows.Count == 0)
+        {
+            throw new InvalidOperationException("valuesJson must contain at least one row.");
+        }
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var updatedCellCount = 0;
+        sessionManager.ExecuteWriteOperation(session, "word_set_table_values", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var tableRows = table.Elements<W.TableRow>().ToList();
+
+            for (var r = 0; r < rows.Count; r++)
+            {
+                var rowData = rows[r];
+                var rowIdx = startRow - 1 + r;
+                if (rowIdx >= tableRows.Count)
+                {
+                    throw new InvalidOperationException($"Row {rowIdx + 1} does not exist in table {tableIndex} (table has {tableRows.Count} rows).");
+                }
+
+                var tableRow = tableRows[rowIdx];
+                var tableCells = tableRow.Elements<W.TableCell>().ToList();
+
+                for (var c = 0; c < rowData.Count; c++)
+                {
+                    var colIdx = startColumn - 1 + c;
+                    if (colIdx >= tableCells.Count)
+                    {
+                        throw new InvalidOperationException($"Column {colIdx + 1} does not exist in table {tableIndex}, row {rowIdx + 1} (row has {tableCells.Count} columns).");
+                    }
+
+                    var cell = tableCells[colIdx];
+                    var cellText = rowData[c].ValueKind == JsonValueKind.String
+                        ? rowData[c].GetString() ?? string.Empty
+                        : rowData[c].ToString();
+
+                    cell.RemoveAllChildren<W.Paragraph>();
+                    cell.Append(new W.Paragraph(new W.Run(new W.Text(cellText))));
+                    updatedCellCount++;
+                }
+            }
+
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_set_table_values", new { tableIndex, startRow, startColumn, updatedCellCount });
     }
 
     public string AddBulletedList(string sessionId, string lines, string bulletStyle = "disc")

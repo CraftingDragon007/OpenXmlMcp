@@ -637,4 +637,132 @@ public partial class OfficeSessionServiceTests
             OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void WordApplyTableStyle_SetsStyleOnTable()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 3);
+            var result = service.WordApplyTableStyle(sessionId, 1, "Table Grid");
+
+            Assert.Contains("\"ok\":true", result, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"styleName\":\"Table Grid\"", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordFormatTableHeaderRow_AppliesBoldAndShading()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 3, 2);
+            service.WordSetTableCell(sessionId, 1, 1, 1, "Header A");
+            service.WordSetTableCell(sessionId, 1, 1, 2, "Header B");
+            var result = service.WordFormatTableHeaderRow(sessionId, 1, bold: true, shadingFill: "D9EAF7");
+
+            Assert.Contains("\"ok\":true", result, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"tableIndex\":1", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordSetTableValues_FillsTableCells()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 3, 3);
+            var result = service.WordSetTableValues(
+                sessionId, 1,
+                "[[\"Component\",\"Location\",\"Status\"],[\"Browser\",\"caQtDM_Web/user\",\"Active\"],[\"Server\",\"caQtDM_Web/srv\",\"Active\"]]");
+
+            Assert.Contains("\"updatedCellCount\":9", result, StringComparison.OrdinalIgnoreCase);
+
+            var cell = service.WordGetTableCell(sessionId, 1, 2, 1);
+            Assert.Equal("Browser", cell);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAppendParagraph_ReturnsParagraphIndex()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var r1 = service.WordAppendParagraph(sessionId, "First");
+            var r2 = service.WordAppendParagraph(sessionId, "Second");
+
+            using var d1 = JsonDocument.Parse(r1);
+            using var d2 = JsonDocument.Parse(r2);
+
+            Assert.Equal(1, d1.RootElement.GetProperty("target").GetProperty("paragraphIndex").GetInt32());
+            Assert.Equal(2, d2.RootElement.GetProperty("target").GetProperty("paragraphIndex").GetInt32());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAddHeading_ReturnsParagraphIndex()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var r1 = service.WordAddHeading(sessionId, 1, "Title");
+            var r2 = service.WordAppendParagraph(sessionId, "Body");
+            var r3 = service.WordAddHeading(sessionId, 2, "Section");
+
+            using var d1 = JsonDocument.Parse(r1);
+            using var d3 = JsonDocument.Parse(r3);
+
+            Assert.Equal(1, d1.RootElement.GetProperty("target").GetProperty("paragraphIndex").GetInt32());
+            Assert.Equal(3, d3.RootElement.GetProperty("target").GetProperty("paragraphIndex").GetInt32());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
 }

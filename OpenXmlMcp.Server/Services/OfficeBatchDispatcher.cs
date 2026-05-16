@@ -35,6 +35,26 @@ internal static class OfficeBatchDispatcher
                     payload["bold"]?.GetValue<bool>() ?? false,
                     payload["italic"]?.GetValue<bool>() ?? false,
                     payload["colorHex"]?.GetValue<string>() ?? "000000"),
+            ["word_apply_table_style"] = static (svc, sessionId, payload) =>
+                _ = svc.WordApplyTableStyle(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'.")),
+            ["word_format_table_header_row"] = static (svc, sessionId, payload) =>
+                _ = svc.WordFormatTableHeaderRow(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["bold"]?.GetValue<bool>() ?? true,
+                    payload["shadingFill"]?.GetValue<string>(),
+                    payload["fontName"]?.GetValue<string>(),
+                    payload["colorHex"]?.GetValue<string>()),
+            ["word_set_table_values"] = static (svc, sessionId, payload) =>
+                _ = svc.WordSetTableValues(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["valuesJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'valuesJson'."),
+                    payload["startRow"]?.GetValue<int>() ?? 1,
+                    payload["startColumn"]?.GetValue<int>() ?? 1),
             ["word_add_table"] = static (svc, sessionId, payload) =>
                 _ = svc.WordAddTable(sessionId, payload["rows"]?.GetValue<int>() ?? 0, payload["columns"]?.GetValue<int>() ?? 0),
             ["word_set_table_cell"] = static (svc, sessionId, payload) =>

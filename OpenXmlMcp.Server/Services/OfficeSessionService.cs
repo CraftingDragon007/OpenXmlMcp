@@ -348,6 +348,15 @@ public class OfficeSessionService(
     public string WordApplyCharacterStyleToText(string sessionId, string anchorText, string styleName, int occurrence = 1, bool matchCase = false)
         => wordService.ApplyCharacterStyleToText(sessionId, anchorText, styleName, occurrence, matchCase);
 
+    public string WordApplyTableStyle(string sessionId, int tableIndex, string styleName)
+        => wordService.ApplyTableStyle(sessionId, tableIndex, styleName);
+
+    public string WordFormatTableHeaderRow(string sessionId, int tableIndex, bool bold = true, string? shadingFill = null, string? fontName = null, string? colorHex = null)
+        => wordService.FormatTableHeaderRow(sessionId, tableIndex, bold, shadingFill, fontName, colorHex);
+
+    public string WordSetTableValues(string sessionId, int tableIndex, string valuesJson, int startRow = 1, int startColumn = 1)
+        => wordService.SetTableValues(sessionId, tableIndex, valuesJson, startRow, startColumn);
+
     public string WordListParagraphRuns(string sessionId, int paragraphIndex)
         => wordService.ListParagraphRuns(sessionId, paragraphIndex);
 
