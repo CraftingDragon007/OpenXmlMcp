@@ -181,6 +181,54 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Applies an existing Word character style to all whole-word matches of one or more query strings.")]
+    public string WordApplyCharacterStyleToAll(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("JSON array of query strings, e.g. [\"-server\",\"CAQTDM_WEB_PATH\"].")] string queriesJson,
+        [Description("Character style id or style name.")] string styleName,
+        [Description("Use case-sensitive matching.")] bool matchCase = false,
+        [Description("Use whole-word matching (default true).")] bool wholeWord = true)
+    {
+        return officeSessionService.WordApplyCharacterStyleToAll(sessionId, queriesJson, styleName, matchCase, wholeWord);
+    }
+
+    [McpServerTool]
+    [Description("Applies an existing Word character style to all regex pattern matches in the document.")]
+    public string WordApplyCharacterStyleByPattern(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Regular expression pattern, e.g. -[A-Za-z0-9_]+ or [A-Z][A-Z0-9_]{2,}.")] string pattern,
+        [Description("Character style id or style name.")] string styleName,
+        [Description("Use case-sensitive matching (default true).")] bool matchCase = true,
+        [Description("Maximum number of matches to style (default 5000, max 50000).")] int maxMatches = 5000)
+    {
+        return officeSessionService.WordApplyCharacterStyleByPattern(sessionId, pattern, styleName, matchCase, maxMatches);
+    }
+
+    [McpServerTool]
+    [Description("Inserts a paragraph immediately after a heading containing the given text.")]
+    public string WordInsertAfterHeading(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Text to search for within heading paragraphs.")] string headingText,
+        [Description("Paragraph text to insert after the heading.")] string text,
+        [Description("1-based occurrence of the matching heading.")] int occurrence = 1,
+        [Description("Use case-sensitive matching.")] bool matchCase = false)
+    {
+        return officeSessionService.WordInsertAfterHeading(sessionId, headingText, text, occurrence, matchCase);
+    }
+
+    [McpServerTool]
+    [Description("Replaces all body content between a heading and the next heading of equal or higher level with new paragraphs.")]
+    public string WordReplaceSection(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Text to search for within the target heading.")] string headingText,
+        [Description("JSON array of replacement paragraph strings.")] string replacementJson,
+        [Description("1-based occurrence of the matching heading.")] int occurrence = 1,
+        [Description("Use case-sensitive matching.")] bool matchCase = false)
+    {
+        return officeSessionService.WordReplaceSection(sessionId, headingText, replacementJson, occurrence, matchCase);
+    }
+
+    [McpServerTool]
     [Description("Applies an existing Word character style to inline text by anchor match.")]
     public string WordApplyCharacterStyleToText(
         [Description("Active DOCX session id.")] string sessionId,

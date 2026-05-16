@@ -54,7 +54,8 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 - Readback: `word_get_paragraph_info`, `word_list_paragraph_runs`
 - Lists: `word_add_bulleted_list`, `word_add_numbered_list`, `word_add_structured_list`
 - Formatting: `word_set_paragraph_style`, `word_set_paragraph_spacing`, `word_set_document_spacing_preset`
-- Styles: `word_list_styles`, `word_apply_style_by_name`, `word_create_or_update_style`, `word_apply_character_style_to_text`
+- Styles: `word_list_styles`, `word_apply_style_by_name`, `word_create_or_update_style`, `word_apply_character_style_to_text`, `word_apply_character_style_to_all`, `word_apply_character_style_by_pattern`
+- Semantic editing: `word_insert_after_heading`, `word_replace_section`
 
 ## Excel
 

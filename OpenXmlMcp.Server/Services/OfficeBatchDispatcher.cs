@@ -125,6 +125,34 @@ internal static class OfficeBatchDispatcher
                     sessionId,
                     payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
                     payload["styleJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleJson'.")),
+            ["word_apply_character_style_to_all"] = static (svc, sessionId, payload) =>
+                _ = svc.WordApplyCharacterStyleToAll(
+                    sessionId,
+                    payload["queriesJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'queriesJson'."),
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
+                    payload["matchCase"]?.GetValue<bool>() ?? false,
+                    payload["wholeWord"]?.GetValue<bool>() ?? true),
+            ["word_apply_character_style_by_pattern"] = static (svc, sessionId, payload) =>
+                _ = svc.WordApplyCharacterStyleByPattern(
+                    sessionId,
+                    payload["pattern"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'pattern'."),
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
+                    payload["matchCase"]?.GetValue<bool>() ?? true,
+                    payload["maxMatches"]?.GetValue<int>() ?? 5000),
+            ["word_insert_after_heading"] = static (svc, sessionId, payload) =>
+                _ = svc.WordInsertAfterHeading(
+                    sessionId,
+                    payload["headingText"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'headingText'."),
+                    payload["text"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'text'."),
+                    payload["occurrence"]?.GetValue<int>() ?? 1,
+                    payload["matchCase"]?.GetValue<bool>() ?? false),
+            ["word_replace_section"] = static (svc, sessionId, payload) =>
+                _ = svc.WordReplaceSection(
+                    sessionId,
+                    payload["headingText"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'headingText'."),
+                    payload["replacementJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'replacementJson'."),
+                    payload["occurrence"]?.GetValue<int>() ?? 1,
+                    payload["matchCase"]?.GetValue<bool>() ?? false),
             ["word_apply_character_style_to_text"] = static (svc, sessionId, payload) =>
                 _ = svc.WordApplyCharacterStyleToText(
                     sessionId,

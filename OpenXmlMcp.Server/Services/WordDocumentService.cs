@@ -826,6 +826,325 @@ public class WordDocumentService(SessionManager sessionManager)
         return SessionManager.BuildMutationResult("word_apply_character_style_to_text", new { styleName, occurrence });
     }
 
+    public string ApplyCharacterStyleToAll(string sessionId, string queriesJson, string styleName, bool matchCase = false, bool wholeWord = true)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(queriesJson);
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+
+        var queries = JsonSerializer.Deserialize<List<string>>(queriesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("queriesJson must be a JSON array of strings.");
+        if (queries.Count == 0)
+        {
+            throw new InvalidOperationException("At least one query is required.");
+        }
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var queryResults = queries.Select(q => new { query = q, matchCount = 0, styledCount = 0 }).ToList();
+        var totalStyled = 0;
+
+        sessionManager.ExecuteWriteOperation(session, "word_apply_character_style_to_all", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            EnsureWordStyleInfrastructure(mainPart);
+
+            var style = ResolveWordStyle(mainPart, styleName)
+                ?? throw new InvalidOperationException($"Style '{styleName}' was not found in document.");
+            if (style.Type?.Value != W.StyleValues.Character)
+            {
+                throw new InvalidOperationException($"Style '{styleName}' is not a character style.");
+            }
+
+            var styleId = style.StyleId?.Value ?? string.Empty;
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var paragraphs = mainPart.Document?.Body?.Descendants<W.Paragraph>().ToList()
+                ?? throw new InvalidOperationException("Word document paragraphs are missing.");
+
+            for (var qi = 0; qi < queries.Count; qi++)
+            {
+                var query = queries[qi];
+                var matchCount = 0;
+                var styledCount = 0;
+
+                // Process paragraphs in reverse to avoid index shifting issues when splitting runs
+                foreach (var paragraph in paragraphs)
+                {
+                    var segments = BuildParagraphRunSegments(paragraph).ToList();
+                    if (segments.Count == 0) continue;
+
+                    var paragraphText = string.Concat(segments.Select(s => s.Text));
+                    var matches = wholeWord
+                        ? FindWholeWordMatches(paragraphText, query, comparison)
+                        : FindAllMatches(paragraphText, query, comparison);
+
+                    if (matches.Count == 0) continue;
+                    matchCount += matches.Count;
+
+                    // Apply in reverse order so earlier offsets are unaffected by splits
+                    foreach (var match in Enumerable.Reverse(matches))
+                    {
+                        var matchStart = match.Start;
+                        var matchEnd = matchStart + match.Length;
+
+                        // Rebuild segments after each apply since run structure changes
+                        var currentSegments = BuildParagraphRunSegments(paragraph).ToList();
+                        var currentText = string.Concat(currentSegments.Select(s => s.Text));
+
+                        // Verify the match still exists at this position
+                        if (matchStart >= currentText.Length)
+                        {
+                            continue;
+                        }
+
+                        foreach (var segment in currentSegments)
+                        {
+                            var segmentEnd = segment.Start + segment.Length;
+                            var overlapStart = Math.Max(matchStart, segment.Start);
+                            var overlapEnd = Math.Min(matchEnd, segmentEnd);
+                            if (overlapEnd <= overlapStart) continue;
+
+                            SplitRunAndApplyCharacterStyle(
+                                segment.Run, segment.Text,
+                                overlapStart - segment.Start,
+                                overlapEnd - overlapStart,
+                                styleId);
+                        }
+
+                        styledCount++;
+                        totalStyled++;
+                    }
+                }
+
+                queryResults[qi] = new { query, matchCount, styledCount };
+            }
+
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_apply_character_style_to_all",
+            new { styleName, totalStyled, queryResults });
+    }
+
+    public string ApplyCharacterStyleByPattern(string sessionId, string pattern, string styleName, bool matchCase = true, int maxMatches = 5000)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pattern);
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+        if (maxMatches < 1 || maxMatches > 50000)
+        {
+            throw new InvalidOperationException("maxMatches must be between 1 and 50000.");
+        }
+
+        // Validate regex before opening doc
+        System.Text.RegularExpressions.Regex regex;
+        try
+        {
+            var options = matchCase
+                ? System.Text.RegularExpressions.RegexOptions.None
+                : System.Text.RegularExpressions.RegexOptions.IgnoreCase;
+            regex = new System.Text.RegularExpressions.Regex(pattern, options, TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Invalid regex pattern: {ex.Message}");
+        }
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var totalStyled = 0;
+        var totalMatches = 0;
+
+        sessionManager.ExecuteWriteOperation(session, "word_apply_character_style_by_pattern", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            EnsureWordStyleInfrastructure(mainPart);
+
+            var style = ResolveWordStyle(mainPart, styleName)
+                ?? throw new InvalidOperationException($"Style '{styleName}' was not found in document.");
+            if (style.Type?.Value != W.StyleValues.Character)
+            {
+                throw new InvalidOperationException($"Style '{styleName}' is not a character style.");
+            }
+
+            var styleId = style.StyleId?.Value ?? string.Empty;
+            var paragraphs = mainPart.Document?.Body?.Descendants<W.Paragraph>().ToList()
+                ?? throw new InvalidOperationException("Word document paragraphs are missing.");
+
+            foreach (var paragraph in paragraphs)
+            {
+                if (totalStyled >= maxMatches) break;
+
+                var segments = BuildParagraphRunSegments(paragraph).ToList();
+                if (segments.Count == 0) continue;
+
+                var paragraphText = string.Concat(segments.Select(s => s.Text));
+                var matches = new List<(int Start, int Length)>();
+                try
+                {
+                    foreach (System.Text.RegularExpressions.Match m in regex.Matches(paragraphText))
+                    {
+                        if (m.Length == 0) continue;
+                        matches.Add((m.Index, m.Length));
+                    }
+                }
+                catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+                {
+                    throw new InvalidOperationException($"Pattern matching timed out on a paragraph. Simplify the pattern.");
+                }
+
+                if (matches.Count == 0) continue;
+                totalMatches += matches.Count;
+
+                foreach (var match in Enumerable.Reverse(matches))
+                {
+                    if (totalStyled >= maxMatches) break;
+
+                    var matchStart = match.Start;
+                    var matchEnd = matchStart + match.Length;
+                    var currentSegments = BuildParagraphRunSegments(paragraph).ToList();
+
+                    foreach (var segment in currentSegments)
+                    {
+                        var segmentEnd = segment.Start + segment.Length;
+                        var overlapStart = Math.Max(matchStart, segment.Start);
+                        var overlapEnd = Math.Min(matchEnd, segmentEnd);
+                        if (overlapEnd <= overlapStart) continue;
+
+                        SplitRunAndApplyCharacterStyle(
+                            segment.Run, segment.Text,
+                            overlapStart - segment.Start,
+                            overlapEnd - overlapStart,
+                            styleId);
+                    }
+
+                    totalStyled++;
+                }
+            }
+
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_apply_character_style_by_pattern",
+            new { pattern, styleName, totalMatches, totalStyled });
+    }
+
+    public string InsertAfterHeading(string sessionId, string headingText, string text, int occurrence = 1, bool matchCase = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(headingText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        if (occurrence < 1) throw new InvalidOperationException("Occurrence must be >= 1.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var insertedIndex = -1;
+
+        sessionManager.ExecuteWriteOperation(session, "word_insert_after_heading", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+            var bodyChildren = body.Elements().ToList();
+            var headingMatches = bodyChildren
+                .OfType<W.Paragraph>()
+                .Where(p => GetHeadingLevel(p).HasValue && p.InnerText.Contains(headingText, comparison))
+                .ToList();
+
+            if (headingMatches.Count < occurrence)
+            {
+                throw new InvalidOperationException($"Heading containing '{headingText}' occurrence {occurrence} was not found (found {headingMatches.Count}).");
+            }
+
+            var targetHeading = headingMatches[occurrence - 1];
+            var newParagraph = new W.Paragraph(new W.Run(new W.Text(text)));
+            ApplyWordParagraphSpacing(newParagraph, DefaultParagraphBeforePt, DefaultParagraphAfterPt, DefaultParagraphLineSpacing);
+            targetHeading.InsertAfterSelf(newParagraph);
+
+            var bodyParagraphs = body.Elements<W.Paragraph>().ToList();
+            insertedIndex = bodyParagraphs.IndexOf(newParagraph) + 1;
+
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_insert_after_heading", new { headingText, insertedIndex, occurrence });
+    }
+
+    public string ReplaceSection(string sessionId, string headingText, string replacementJson, int occurrence = 1, bool matchCase = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(headingText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replacementJson);
+        if (occurrence < 1) throw new InvalidOperationException("Occurrence must be >= 1.");
+
+        var replacementParagraphs = JsonSerializer.Deserialize<List<string>>(replacementJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("replacementJson must be a JSON array of paragraph strings.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var removedCount = 0;
+        var insertedCount = 0;
+
+        sessionManager.ExecuteWriteOperation(session, "word_replace_section", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+            var bodyChildren = body.Elements().ToList();
+            var headingMatches = bodyChildren
+                .OfType<W.Paragraph>()
+                .Where(p => GetHeadingLevel(p).HasValue && p.InnerText.Contains(headingText, comparison))
+                .ToList();
+
+            if (headingMatches.Count < occurrence)
+            {
+                throw new InvalidOperationException($"Heading containing '{headingText}' occurrence {occurrence} was not found (found {headingMatches.Count}).");
+            }
+
+            var targetHeading = headingMatches[occurrence - 1];
+            var targetLevel = GetHeadingLevel(targetHeading)!.Value;
+
+            // Collect all body elements between this heading and the next heading of equal/higher level
+            var toRemove = new List<OpenXmlElement>();
+            var started = false;
+            foreach (var child in bodyChildren)
+            {
+                if (ReferenceEquals(child, targetHeading))
+                {
+                    started = true;
+                    continue;
+                }
+
+                if (!started) continue;
+
+                if (child is W.Paragraph p && GetHeadingLevel(p) is int lvl && lvl <= targetLevel)
+                {
+                    break;
+                }
+
+                toRemove.Add(child);
+            }
+
+            // Insert new paragraphs after the heading, then remove old ones
+            var anchor = (OpenXmlElement)targetHeading;
+            foreach (var paraText in replacementParagraphs)
+            {
+                var newPara = new W.Paragraph(new W.Run(new W.Text(paraText)));
+                ApplyWordParagraphSpacing(newPara, DefaultParagraphBeforePt, DefaultParagraphAfterPt, DefaultParagraphLineSpacing);
+                anchor.InsertAfterSelf(newPara);
+                anchor = newPara;
+                insertedCount++;
+            }
+
+            foreach (var el in toRemove)
+            {
+                el.Remove();
+                removedCount++;
+            }
+
+            document.MainDocumentPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_replace_section",
+            new { headingText, occurrence, removedCount, insertedCount });
+    }
+
     public string ListParagraphRuns(string sessionId, int paragraphIndex)
     {
         var session = sessionManager.GetSession(sessionId);
@@ -1771,6 +2090,20 @@ public class WordDocumentService(SessionManager sessionManager)
     }
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+    private static List<(int Start, int Length)> FindAllMatches(string text, string query, StringComparison comparison)
+    {
+        var matches = new List<(int Start, int Length)>();
+        var startIndex = 0;
+        while (true)
+        {
+            var index = text.IndexOf(query, startIndex, comparison);
+            if (index < 0) break;
+            matches.Add((index, query.Length));
+            startIndex = index + Math.Max(1, query.Length);
+        }
+        return matches;
+    }
 
     private static W.Style? ResolveWordStyle(MainDocumentPart mainPart, string styleName)
     {

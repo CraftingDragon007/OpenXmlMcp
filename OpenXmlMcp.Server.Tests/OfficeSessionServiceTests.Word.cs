@@ -639,6 +639,133 @@ public partial class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordApplyCharacterStyleToAll_StylesAllWholeWordMatches()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Parameters Parameter path");
+            service.WordAppendParagraph(sessionId, "Another Parameter here");
+
+            var result = service.WordApplyCharacterStyleToAll(
+                sessionId,
+                "[\"Parameter\",\"path\"]",
+                "Strong",
+                matchCase: false,
+                wholeWord: true);
+
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            // "Parameter" appears twice (not "Parameters"), "path" appears once = 3 total
+            Assert.Equal(3, doc.RootElement.GetProperty("target").GetProperty("totalStyled").GetInt32());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordApplyCharacterStyleByPattern_StylesPatternMatches()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Use -server and -port flags");
+            service.WordAppendParagraph(sessionId, "Set CAQTDM_WEB_PATH and HOME_DIR env vars");
+
+            var r1 = service.WordApplyCharacterStyleByPattern(sessionId, @"-[A-Za-z0-9_]+", "Strong", matchCase: true);
+            var r2 = service.WordApplyCharacterStyleByPattern(sessionId, @"[A-Z][A-Z0-9_]{2,}", "IntenseReference", matchCase: true);
+
+            using var d1 = JsonDocument.Parse(r1);
+            using var d2 = JsonDocument.Parse(r2);
+            Assert.True(d1.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, d1.RootElement.GetProperty("target").GetProperty("totalStyled").GetInt32());
+            Assert.True(d2.RootElement.GetProperty("ok").GetBoolean());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordInsertAfterHeading_InsertsCorrectly()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddHeading(sessionId, 1, "Introduction");
+            service.WordAppendParagraph(sessionId, "Existing body");
+            service.WordAddHeading(sessionId, 2, "Details");
+
+            var result = service.WordInsertAfterHeading(sessionId, "Introduction", "Inserted paragraph");
+
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doc.RootElement.GetProperty("target").GetProperty("insertedIndex").GetInt32());
+
+            // Verify position: para after heading is the inserted one
+            var info = service.WordGetParagraphInfo(sessionId, 2);
+            Assert.Contains("Inserted paragraph", info, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordReplaceSection_ReplacesBodyUnderHeading()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddHeading(sessionId, 1, "Overview");
+            service.WordAppendParagraph(sessionId, "Old paragraph one");
+            service.WordAppendParagraph(sessionId, "Old paragraph two");
+            service.WordAddHeading(sessionId, 1, "Details");
+
+            var result = service.WordReplaceSection(
+                sessionId, "Overview",
+                "[\"New content paragraph\"]");
+
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doc.RootElement.GetProperty("target").GetProperty("removedCount").GetInt32());
+            Assert.Equal(1, doc.RootElement.GetProperty("target").GetProperty("insertedCount").GetInt32());
+
+            // Document should now have: Overview heading, new para, Details heading
+            var find = service.FindText(sessionId, "Old paragraph");
+            Assert.Contains("\"matchCount\":0", find, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void WordApplyTableStyle_SetsStyleOnTable()
     {
         var service = OfficeSessionServiceTestHelpers.CreateService();

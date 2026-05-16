@@ -348,6 +348,18 @@ public class OfficeSessionService(
     public string WordApplyCharacterStyleToText(string sessionId, string anchorText, string styleName, int occurrence = 1, bool matchCase = false)
         => wordService.ApplyCharacterStyleToText(sessionId, anchorText, styleName, occurrence, matchCase);
 
+    public string WordApplyCharacterStyleToAll(string sessionId, string queriesJson, string styleName, bool matchCase = false, bool wholeWord = true)
+        => wordService.ApplyCharacterStyleToAll(sessionId, queriesJson, styleName, matchCase, wholeWord);
+
+    public string WordApplyCharacterStyleByPattern(string sessionId, string pattern, string styleName, bool matchCase = true, int maxMatches = 5000)
+        => wordService.ApplyCharacterStyleByPattern(sessionId, pattern, styleName, matchCase, maxMatches);
+
+    public string WordInsertAfterHeading(string sessionId, string headingText, string text, int occurrence = 1, bool matchCase = false)
+        => wordService.InsertAfterHeading(sessionId, headingText, text, occurrence, matchCase);
+
+    public string WordReplaceSection(string sessionId, string headingText, string replacementJson, int occurrence = 1, bool matchCase = false)
+        => wordService.ReplaceSection(sessionId, headingText, replacementJson, occurrence, matchCase);
+
     public string WordApplyTableStyle(string sessionId, int tableIndex, string styleName)
         => wordService.ApplyTableStyle(sessionId, tableIndex, styleName);
 
