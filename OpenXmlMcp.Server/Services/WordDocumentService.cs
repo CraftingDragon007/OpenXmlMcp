@@ -497,6 +497,378 @@ public class WordDocumentService(SessionManager sessionManager)
         return SessionManager.BuildMutationResult("word_set_table_values", new { tableIndex, startRow, startColumn, updatedCellCount });
     }
 
+    public string AddTableRow(string sessionId, int tableIndex, int? rowIndex = null)
+    {
+        if (tableIndex < 1) throw new InvalidOperationException("tableIndex must be >= 1.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var insertedRowIndex = -1;
+        var rowCount = -1;
+        sessionManager.ExecuteWriteOperation(session, "word_add_table_row", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var rows = table.Elements<W.TableRow>().ToList();
+
+            // Derive column count from first row (or 1 if table is empty)
+            var columnCount = rows.Count > 0 ? rows[0].Elements<W.TableCell>().Count() : 1;
+
+            var newRow = new W.TableRow();
+            for (var c = 0; c < columnCount; c++)
+            {
+                newRow.Append(new W.TableCell(new W.Paragraph(new W.Run(new W.Text(string.Empty)))));
+            }
+
+            if (rowIndex.HasValue)
+            {
+                if (rowIndex.Value < 1 || rowIndex.Value > rows.Count + 1)
+                {
+                    throw new InvalidOperationException($"rowIndex {rowIndex.Value} is out of range. Valid range is 1..{rows.Count + 1}.");
+                }
+
+                if (rowIndex.Value <= rows.Count)
+                {
+                    rows[rowIndex.Value - 1].InsertBeforeSelf(newRow);
+                    insertedRowIndex = rowIndex.Value;
+                }
+                else
+                {
+                    table.Append(newRow);
+                    insertedRowIndex = rows.Count + 1;
+                }
+            }
+            else
+            {
+                table.Append(newRow);
+                insertedRowIndex = rows.Count + 1;
+            }
+
+            rowCount = table.Elements<W.TableRow>().Count();
+            document.MainDocumentPart!.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_add_table_row", new { tableIndex, rowIndex = insertedRowIndex, rowCount });
+    }
+
+    public string DeleteTableRow(string sessionId, int tableIndex, int rowIndex)
+    {
+        if (tableIndex < 1) throw new InvalidOperationException("tableIndex must be >= 1.");
+        if (rowIndex < 1) throw new InvalidOperationException("rowIndex must be >= 1.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var rowCount = -1;
+        sessionManager.ExecuteWriteOperation(session, "word_delete_table_row", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var rows = table.Elements<W.TableRow>().ToList();
+
+            if (rows.Count <= 1)
+            {
+                throw new InvalidOperationException($"Cannot delete the only row in table {tableIndex}.");
+            }
+
+            if (rowIndex > rows.Count)
+            {
+                throw new InvalidOperationException($"rowIndex {rowIndex} is out of range. Table {tableIndex} has {rows.Count} rows.");
+            }
+
+            rows[rowIndex - 1].Remove();
+            rowCount = table.Elements<W.TableRow>().Count();
+            document.MainDocumentPart!.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_delete_table_row", new { tableIndex, removedIndex = rowIndex, rowCount });
+    }
+
+    public string AddTableColumn(string sessionId, int tableIndex, int? columnIndex = null)
+    {
+        if (tableIndex < 1) throw new InvalidOperationException("tableIndex must be >= 1.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var insertedColumnIndex = -1;
+        var columnCount = -1;
+        sessionManager.ExecuteWriteOperation(session, "word_add_table_column", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var rows = table.Elements<W.TableRow>().ToList();
+
+            if (rows.Count == 0)
+            {
+                throw new InvalidOperationException($"Table {tableIndex} has no rows.");
+            }
+
+            var firstRowCells = rows[0].Elements<W.TableCell>().ToList();
+            var currentColumnCount = firstRowCells.Count;
+
+            // Validate / normalise columnIndex
+            int insertAt;
+            if (columnIndex.HasValue)
+            {
+                if (columnIndex.Value < 1 || columnIndex.Value > currentColumnCount + 1)
+                {
+                    throw new InvalidOperationException($"columnIndex {columnIndex.Value} is out of range. Valid range is 1..{currentColumnCount + 1}.");
+                }
+
+                insertAt = columnIndex.Value;
+            }
+            else
+            {
+                insertAt = currentColumnCount + 1;
+            }
+
+            foreach (var row in rows)
+            {
+                var cells = row.Elements<W.TableCell>().ToList();
+                var newCell = new W.TableCell(new W.Paragraph(new W.Run(new W.Text(string.Empty))));
+
+                if (insertAt <= cells.Count)
+                {
+                    cells[insertAt - 1].InsertBeforeSelf(newCell);
+                }
+                else
+                {
+                    row.Append(newCell);
+                }
+            }
+
+            insertedColumnIndex = insertAt;
+            columnCount = rows[0].Elements<W.TableCell>().Count();
+            document.MainDocumentPart!.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_add_table_column", new { tableIndex, columnIndex = insertedColumnIndex, columnCount });
+    }
+
+    public string DeleteTableColumn(string sessionId, int tableIndex, int columnIndex)
+    {
+        if (tableIndex < 1) throw new InvalidOperationException("tableIndex must be >= 1.");
+        if (columnIndex < 1) throw new InvalidOperationException("columnIndex must be >= 1.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var columnCount = -1;
+        sessionManager.ExecuteWriteOperation(session, "word_delete_table_column", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var rows = table.Elements<W.TableRow>().ToList();
+
+            if (rows.Count == 0)
+            {
+                throw new InvalidOperationException($"Table {tableIndex} has no rows.");
+            }
+
+            var firstRowCells = rows[0].Elements<W.TableCell>().ToList();
+            if (firstRowCells.Count <= 1)
+            {
+                throw new InvalidOperationException($"Cannot delete the only column in table {tableIndex}.");
+            }
+
+            if (columnIndex > firstRowCells.Count)
+            {
+                throw new InvalidOperationException($"columnIndex {columnIndex} is out of range. Table {tableIndex} has {firstRowCells.Count} columns.");
+            }
+
+            foreach (var row in rows)
+            {
+                var cells = row.Elements<W.TableCell>().ToList();
+                if (columnIndex <= cells.Count)
+                {
+                    cells[columnIndex - 1].Remove();
+                }
+            }
+
+            columnCount = rows[0].Elements<W.TableCell>().Count();
+            document.MainDocumentPart!.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_delete_table_column", new { tableIndex, removedIndex = columnIndex, columnCount });
+    }
+
+    public string MergeTableCells(string sessionId, int tableIndex, int rowIndex, int startColumnIndex, int endColumnIndex)
+    {
+        if (tableIndex < 1) throw new InvalidOperationException("tableIndex must be >= 1.");
+        if (rowIndex < 1) throw new InvalidOperationException("rowIndex must be >= 1.");
+        if (startColumnIndex < 1) throw new InvalidOperationException("startColumnIndex must be >= 1.");
+        if (endColumnIndex < startColumnIndex) throw new InvalidOperationException("endColumnIndex must be >= startColumnIndex.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var mergedCellCount = 0;
+        sessionManager.ExecuteWriteOperation(session, "word_merge_table_cells", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var table = GetWordTableByIndex(body, tableIndex);
+            var rows = table.Elements<W.TableRow>().ToList();
+
+            if (rowIndex > rows.Count)
+            {
+                throw new InvalidOperationException($"rowIndex {rowIndex} is out of range. Table {tableIndex} has {rows.Count} rows.");
+            }
+
+            var row = rows[rowIndex - 1];
+            var cells = row.Elements<W.TableCell>().ToList();
+
+            if (endColumnIndex > cells.Count)
+            {
+                throw new InvalidOperationException($"endColumnIndex {endColumnIndex} is out of range. Row has {cells.Count} columns.");
+            }
+
+            if (startColumnIndex == endColumnIndex)
+            {
+                throw new InvalidOperationException("startColumnIndex and endColumnIndex must differ; nothing to merge.");
+            }
+
+            var span = endColumnIndex - startColumnIndex + 1;
+
+            // Set GridSpan on the first cell
+            var firstCell = cells[startColumnIndex - 1];
+            var tcPr = firstCell.TableCellProperties ?? new W.TableCellProperties();
+            if (firstCell.TableCellProperties == null)
+            {
+                firstCell.InsertAt(tcPr, 0);
+            }
+
+            var existingGridSpan = tcPr.GetFirstChild<W.GridSpan>();
+            if (existingGridSpan != null)
+            {
+                existingGridSpan.Val = span;
+            }
+            else
+            {
+                tcPr.Append(new W.GridSpan { Val = span });
+            }
+
+            // Remove the spanned cells
+            for (var ci = endColumnIndex - 1; ci >= startColumnIndex; ci--)
+            {
+                cells[ci].Remove();
+                mergedCellCount++;
+            }
+
+            document.MainDocumentPart!.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_merge_table_cells", new { tableIndex, rowIndex, startColumnIndex, endColumnIndex, mergedCellCount });
+    }
+
+    public string DeleteParagraph(string sessionId, int paragraphIndex)
+    {
+        if (paragraphIndex < 1) throw new InvalidOperationException("paragraphIndex must be >= 1.");
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_delete_paragraph", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var paragraphs = body.Elements<W.Paragraph>().ToList();
+
+            if (paragraphIndex > paragraphs.Count)
+            {
+                throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
+            }
+
+            if (paragraphs.Count <= 1)
+            {
+                throw new InvalidOperationException("Cannot delete the only paragraph in the document. Word requires at least one paragraph.");
+            }
+
+            paragraphs[paragraphIndex - 1].Remove();
+            document.MainDocumentPart!.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_delete_paragraph", new { removedIndex = paragraphIndex });
+    }
+
+    public string DeleteStyle(string sessionId, string styleName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var deletedStyleId = string.Empty;
+        var orphanedReferences = new List<object>();
+
+        sessionManager.ExecuteWriteOperation(session, "word_delete_style", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            var stylePart = mainPart.StyleDefinitionsPart ?? throw new InvalidOperationException("Style definitions part is missing.");
+            var styles = stylePart.Styles ?? throw new InvalidOperationException("Styles are missing.");
+
+            // Resolve style by id or name
+            var style = styles.Elements<W.Style>().FirstOrDefault(s =>
+                string.Equals(s.StyleId?.Value, styleName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s.StyleName?.Val?.Value, styleName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Style '{styleName}' was not found.");
+
+            // Protect built-in styles
+            var styleId = style.StyleId?.Value ?? styleName;
+            var isBuiltIn = WordBuiltInStyles.Any(b =>
+                string.Equals(b.StyleId, styleId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(b.Name, styleName, StringComparison.OrdinalIgnoreCase));
+
+            if (isBuiltIn)
+            {
+                throw new InvalidOperationException($"Style '{styleName}' is a built-in style and cannot be deleted.");
+            }
+
+            deletedStyleId = styleId;
+
+            // Remove style definition
+            style.Remove();
+            stylePart.Styles.Save();
+
+            // Scan for orphaned references
+            var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var bodyParagraphs = body.Elements<W.Paragraph>().ToList();
+
+            for (var pi = 0; pi < bodyParagraphs.Count; pi++)
+            {
+                var para = bodyParagraphs[pi];
+                var paraStyleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                if (string.Equals(paraStyleId, deletedStyleId, StringComparison.OrdinalIgnoreCase))
+                {
+                    orphanedReferences.Add(new
+                    {
+                        type = "paragraph",
+                        paragraphIndex = pi + 1,
+                        preview = TrimPreview(para.InnerText)
+                    });
+                }
+
+                var runs = para.Elements<W.Run>().ToList();
+                for (var ri = 0; ri < runs.Count; ri++)
+                {
+                    var runStyleId = runs[ri].RunProperties?.RunStyle?.Val?.Value;
+                    if (string.Equals(runStyleId, deletedStyleId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        orphanedReferences.Add(new
+                        {
+                            type = "run",
+                            paragraphIndex = pi + 1,
+                            runIndex = ri + 1,
+                            preview = TrimPreview(runs[ri].InnerText)
+                        });
+                    }
+                }
+            }
+
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildResult("word_delete_style", new
+        {
+            deletedStyle = deletedStyleId,
+            orphanedReferenceCount = orphanedReferences.Count,
+            orphanedReferences
+        });
+    }
+
     public string AddBulletedList(string sessionId, string lines, string bulletStyle = "disc")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(lines);

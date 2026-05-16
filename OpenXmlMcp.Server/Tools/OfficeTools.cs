@@ -205,6 +205,76 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Adds a row to a Word table. Appends if rowIndex is omitted, otherwise inserts before the given 1-based row index.")]
+    public string WordAddTableRow(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("Optional 1-based row index to insert before. Omit to append.")] int? rowIndex = null)
+    {
+        return officeSessionService.WordAddTableRow(sessionId, tableIndex, rowIndex);
+    }
+
+    [McpServerTool]
+    [Description("Deletes a row from a Word table by 1-based row index.")]
+    public string WordDeleteTableRow(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("1-based row index to delete.")] int rowIndex)
+    {
+        return officeSessionService.WordDeleteTableRow(sessionId, tableIndex, rowIndex);
+    }
+
+    [McpServerTool]
+    [Description("Adds a column to a Word table. Appends if columnIndex is omitted, otherwise inserts before the given 1-based column index.")]
+    public string WordAddTableColumn(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("Optional 1-based column index to insert before. Omit to append.")] int? columnIndex = null)
+    {
+        return officeSessionService.WordAddTableColumn(sessionId, tableIndex, columnIndex);
+    }
+
+    [McpServerTool]
+    [Description("Deletes a column from a Word table by 1-based column index.")]
+    public string WordDeleteTableColumn(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("1-based column index to delete.")] int columnIndex)
+    {
+        return officeSessionService.WordDeleteTableColumn(sessionId, tableIndex, columnIndex);
+    }
+
+    [McpServerTool]
+    [Description("Merges a range of cells horizontally in a single table row using GridSpan.")]
+    public string WordMergeTableCells(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based table index.")] int tableIndex,
+        [Description("1-based row index.")] int rowIndex,
+        [Description("1-based start column index (inclusive).")] int startColumnIndex,
+        [Description("1-based end column index (inclusive).")] int endColumnIndex)
+    {
+        return officeSessionService.WordMergeTableCells(sessionId, tableIndex, rowIndex, startColumnIndex, endColumnIndex);
+    }
+
+    [McpServerTool]
+    [Description("Deletes a body paragraph by 1-based index. Rejects if it would leave the document empty.")]
+    public string WordDeleteParagraph(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based paragraph index.")] int paragraphIndex)
+    {
+        return officeSessionService.WordDeleteParagraph(sessionId, paragraphIndex);
+    }
+
+    [McpServerTool]
+    [Description("Deletes a custom style by name or id. Built-in styles are protected. Returns orphaned references where the style was in use.")]
+    public string WordDeleteStyle(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Style id or display name of the custom style to delete.")] string styleName)
+    {
+        return officeSessionService.WordDeleteStyle(sessionId, styleName);
+    }
+
+    [McpServerTool]
     [Description("Creates or updates a custom Word paragraph or character style from JSON options.")]
     public string WordUpdateStyle(
         [Description("Active DOCX session id.")] string sessionId,

@@ -372,6 +372,27 @@ public class OfficeSessionService(
     public string WordSetFooter(string sessionId, string text, int sectionIndex = 1)
         => wordService.SetFooter(sessionId, text, sectionIndex);
 
+    public string WordAddTableRow(string sessionId, int tableIndex, int? rowIndex = null)
+        => wordService.AddTableRow(sessionId, tableIndex, rowIndex);
+
+    public string WordDeleteTableRow(string sessionId, int tableIndex, int rowIndex)
+        => wordService.DeleteTableRow(sessionId, tableIndex, rowIndex);
+
+    public string WordAddTableColumn(string sessionId, int tableIndex, int? columnIndex = null)
+        => wordService.AddTableColumn(sessionId, tableIndex, columnIndex);
+
+    public string WordDeleteTableColumn(string sessionId, int tableIndex, int columnIndex)
+        => wordService.DeleteTableColumn(sessionId, tableIndex, columnIndex);
+
+    public string WordMergeTableCells(string sessionId, int tableIndex, int rowIndex, int startColumnIndex, int endColumnIndex)
+        => wordService.MergeTableCells(sessionId, tableIndex, rowIndex, startColumnIndex, endColumnIndex);
+
+    public string WordDeleteParagraph(string sessionId, int paragraphIndex)
+        => wordService.DeleteParagraph(sessionId, paragraphIndex);
+
+    public string WordDeleteStyle(string sessionId, string styleName)
+        => wordService.DeleteStyle(sessionId, styleName);
+
     public string WordUpdateStyle(string sessionId, string styleName, string styleJson)
         => wordService.UpdateStyle(sessionId, styleName, styleJson);
 

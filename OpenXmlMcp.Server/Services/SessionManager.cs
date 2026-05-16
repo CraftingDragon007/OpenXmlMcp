@@ -208,6 +208,17 @@ public class SessionManager
         });
     }
 
+    /// <summary>Builds a read-result (no changed/mutation semantics) with arbitrary top-level fields merged from <paramref name="result"/>.</summary>
+    public static string BuildResult(string operation, object result)
+    {
+        // Serialize via JsonNode so we can inject ok+operation at the top level alongside result fields.
+        var node = JsonSerializer.SerializeToNode(result) as System.Text.Json.Nodes.JsonObject
+            ?? throw new InvalidOperationException("BuildResult requires an object result.");
+        node.Insert(0, "operation", System.Text.Json.Nodes.JsonValue.Create(operation));
+        node.Insert(0, "ok", System.Text.Json.Nodes.JsonValue.Create(true));
+        return node.ToJsonString();
+    }
+
     private sealed record OperationLogEntry(DateTimeOffset TimestampUtc, string CanonicalOperationName, string PublicOperationName, string Message)
     {
         public string OperationName => CanonicalOperationName;

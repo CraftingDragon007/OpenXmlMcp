@@ -139,6 +139,41 @@ internal static class OfficeBatchDispatcher
                     payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
                     payload["matchCase"]?.GetValue<bool>() ?? true,
                     payload["maxMatches"]?.GetValue<int>() ?? 5000),
+            ["word_add_table_row"] = static (svc, sessionId, payload) =>
+                _ = svc.WordAddTableRow(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["rowIndex"]?.GetValue<int>()),
+            ["word_delete_table_row"] = static (svc, sessionId, payload) =>
+                _ = svc.WordDeleteTableRow(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["rowIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'rowIndex'.")),
+            ["word_add_table_column"] = static (svc, sessionId, payload) =>
+                _ = svc.WordAddTableColumn(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["columnIndex"]?.GetValue<int>()),
+            ["word_delete_table_column"] = static (svc, sessionId, payload) =>
+                _ = svc.WordDeleteTableColumn(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["columnIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'columnIndex'.")),
+            ["word_merge_table_cells"] = static (svc, sessionId, payload) =>
+                _ = svc.WordMergeTableCells(
+                    sessionId,
+                    payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
+                    payload["rowIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'rowIndex'."),
+                    payload["startColumnIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'startColumnIndex'."),
+                    payload["endColumnIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'endColumnIndex'.")),
+            ["word_delete_paragraph"] = static (svc, sessionId, payload) =>
+                _ = svc.WordDeleteParagraph(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'paragraphIndex'.")),
+            ["word_delete_style"] = static (svc, sessionId, payload) =>
+                _ = svc.WordDeleteStyle(
+                    sessionId,
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'.")),
             ["word_update_style"] = static (svc, sessionId, payload) =>
                 _ = svc.WordUpdateStyle(
                     sessionId,

@@ -766,6 +766,249 @@ public partial class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordAddTableRow_AppendsAndInsertsRow()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 3);
+
+            // Append a row
+            var appendResult = service.WordAddTableRow(sessionId, 1);
+            using (var doc1 = JsonDocument.Parse(appendResult))
+            {
+                Assert.True(doc1.RootElement.GetProperty("ok").GetBoolean());
+                Assert.Equal(3, doc1.RootElement.GetProperty("target").GetProperty("rowCount").GetInt32());
+                Assert.Equal(3, doc1.RootElement.GetProperty("target").GetProperty("rowIndex").GetInt32());
+            }
+
+            // Insert at index 1 (before first row)
+            var insertResult = service.WordAddTableRow(sessionId, 1, 1);
+            using (var doc2 = JsonDocument.Parse(insertResult))
+            {
+                Assert.Equal(4, doc2.RootElement.GetProperty("target").GetProperty("rowCount").GetInt32());
+                Assert.Equal(1, doc2.RootElement.GetProperty("target").GetProperty("rowIndex").GetInt32());
+            }
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordDeleteTableRow_RemovesRow()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 3, 2);
+            service.WordSetTableCell(sessionId, 1, 1, 1, "Header");
+
+            var result = service.WordDeleteTableRow(sessionId, 1, 1);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doc.RootElement.GetProperty("target").GetProperty("rowCount").GetInt32());
+
+            // Verify the header cell is gone
+            var cell = service.WordGetTableCell(sessionId, 1, 1, 1);
+            Assert.NotEqual("Header", cell);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAddTableColumn_AppendsAndInsertsColumn()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 2);
+
+            // Append a column
+            var appendResult = service.WordAddTableColumn(sessionId, 1);
+            using (var doc1 = JsonDocument.Parse(appendResult))
+            {
+                Assert.True(doc1.RootElement.GetProperty("ok").GetBoolean());
+                Assert.Equal(3, doc1.RootElement.GetProperty("target").GetProperty("columnCount").GetInt32());
+                Assert.Equal(3, doc1.RootElement.GetProperty("target").GetProperty("columnIndex").GetInt32());
+            }
+
+            // Insert at column 1 (before first column)
+            var insertResult = service.WordAddTableColumn(sessionId, 1, 1);
+            using (var doc2 = JsonDocument.Parse(insertResult))
+            {
+                Assert.Equal(4, doc2.RootElement.GetProperty("target").GetProperty("columnCount").GetInt32());
+                Assert.Equal(1, doc2.RootElement.GetProperty("target").GetProperty("columnIndex").GetInt32());
+            }
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordDeleteTableColumn_RemovesColumnFromAllRows()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 3);
+            service.WordSetTableCell(sessionId, 1, 1, 2, "MiddleCol");
+
+            var result = service.WordDeleteTableColumn(sessionId, 1, 2);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doc.RootElement.GetProperty("target").GetProperty("columnCount").GetInt32());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordMergeTableCells_SetsGridSpanAndRemovesCells()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 4);
+
+            // Merge columns 1-3 in row 1
+            var result = service.WordMergeTableCells(sessionId, 1, 1, 1, 3);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doc.RootElement.GetProperty("target").GetProperty("mergedCellCount").GetInt32());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordDeleteParagraph_RemovesBodyParagraph()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Keep this");
+            service.WordAppendParagraph(sessionId, "Delete this");
+            service.WordAppendParagraph(sessionId, "Keep this too");
+
+            // Find index of "Delete this" — it was appended after the first default paragraph,
+            // so it's paragraph 3 (default + Keep + Delete)
+            var findBefore = service.FindText(sessionId, "Delete this");
+            Assert.Contains("matchCount\":1", findBefore);
+
+            var result = service.WordDeleteParagraph(sessionId, 2);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doc.RootElement.GetProperty("target").GetProperty("removedIndex").GetInt32());
+
+            var findAfter = service.FindText(sessionId, "Delete this");
+            Assert.Contains("matchCount\":0", findAfter);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordDeleteStyle_CustomOnly_ReturnsOrphans()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+
+            // Create a custom style and apply it
+            service.WordCreateOrUpdateStyle(sessionId, "MyCustomStyle",
+                "{\"fontSize\":14,\"colorHex\":\"AA0000\"}");
+            service.WordAppendParagraph(sessionId, "Styled paragraph");
+            service.WordApplyStyleByName(sessionId, 1, "MyCustomStyle");
+            service.WordAppendParagraph(sessionId, "Another paragraph");
+            service.WordApplyStyleByName(sessionId, 2, "MyCustomStyle");
+
+            var result = service.WordDeleteStyle(sessionId, "MyCustomStyle");
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+            Assert.Equal("MyCustomStyle", doc.RootElement.GetProperty("deletedStyle").GetString());
+            Assert.True(doc.RootElement.GetProperty("orphanedReferenceCount").GetInt32() >= 2);
+
+            // Verify the style is gone from listing
+            var styles = service.WordListStyles(sessionId);
+            Assert.DoesNotContain("MyCustomStyle", styles);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordDeleteStyle_BuiltIn_Throws()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                service.WordDeleteStyle(sessionId, "Heading 1"));
+            Assert.Contains("built-in", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void WordUpdateStyle_ModifiesBuiltInStyle()
     {
         var service = OfficeSessionServiceTestHelpers.CreateService();
