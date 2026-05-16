@@ -4,7 +4,7 @@ namespace OpenXmlMcp.Server.Tests;
 
 public class OfficeSampleFilesIntegrationTests
 {
-    private readonly OfficeSessionService _service = new();
+    private readonly OfficeSessionService _service = OfficeSessionServiceTestHelpers.CreateService();
 
     [Fact]
     public void SampleDocxFile_CanBeOpenedAndInspected()

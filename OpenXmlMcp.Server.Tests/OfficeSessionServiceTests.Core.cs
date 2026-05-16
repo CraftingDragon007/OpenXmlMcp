@@ -9,7 +9,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void GetDocumentInfo_ReturnsSessionPayload()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -31,7 +31,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ValidateOperation_ReadOnlySession_ReturnsInvalidForWriteOperation()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -55,7 +55,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void BatchExecute_MixedOperations_ReportsFailuresAndSuccesses()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -82,7 +82,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void BatchExecute_AcceptsWrappedPayloadAndOperationNameAlias()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -110,7 +110,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void BatchExecute_InvalidPayload_ReturnsHelpfulErrorCode()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -130,7 +130,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ValidateOperation_KnowsPhase2OperationNames()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -150,7 +150,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void UndoLastChange_RestoresPreviousState()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -172,7 +172,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void GetOperationHistory_ReturnsEntries()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -193,7 +193,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void OpenDocument_LargeFile_ThrowsSafetyException()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -212,7 +212,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ValidateOperation_AcceptsPowerPointUnderscoreAliases()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -235,7 +235,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void BatchExecute_AcceptsPowerPointUnderscoreAliases()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -260,7 +260,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ValidateOperation_AcceptsPowerPointAddSlideAlias()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -280,7 +280,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void BatchExecute_FailurePayload_ContainsIndexAndErrorCode()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -304,7 +304,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ValidateOperation_AcceptsApplyStylePreset()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -324,7 +324,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ApplyStylePreset_PowerPointNeutral_UpdatesThemeName()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -352,7 +352,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ListStylePresets_ReturnsDocumentTypeSpecificPresets()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -373,7 +373,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ApplyStylePreset_InvalidPreset_ThrowsHelpfulMessage()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -394,7 +394,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void MutationOperations_ReturnStructuredPayload()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try

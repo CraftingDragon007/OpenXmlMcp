@@ -9,7 +9,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSession_AddSlideAndFind_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -33,7 +33,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSession_AddBulletSlide_IsSearchable()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -54,7 +54,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointStructure_ContainsSlidesMetadata()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -77,7 +77,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointInsertSlideAt_UsesOneBasedIndex()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -100,7 +100,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSetSlideTitleAndBody_UpdatesSlideContent()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -125,7 +125,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSetSlideBody_CanConvertTextToBulletedOrNumbered()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -153,7 +153,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointStructure_BodyContainsAllListLines()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -176,7 +176,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSetAndGetSlideNotes_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -198,7 +198,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointStructure_IncludesNotesPreview()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -220,7 +220,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointReorderAndDeleteSlide_Work()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -248,7 +248,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointCreateDocument_HasSlideMasterAndTheme()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -274,7 +274,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointAddSlide_UsesReadableDefaultFontSizes()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -303,7 +303,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSetTextStyle_AndApplyTextPreset_Work()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -326,7 +326,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointGetTextStyle_ReturnsFontFields()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try

@@ -9,7 +9,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordSession_CreateAppendFind_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -33,7 +33,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordSession_AddTable_IncreasesTableCount()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -54,7 +54,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordTableCell_SetAndGet_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -76,7 +76,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordStructure_ContainsElementsAndTableSummaries()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -103,7 +103,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordFindText_InTable_ReportsAddressabilityMetadata()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -128,7 +128,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointBulletSlide_UsesRealBulletParagraphs()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -154,7 +154,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointAddSlide_NumberedBody_UsesAutoNumberedParagraphs()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -180,7 +180,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordInsertParagraphAt_UsesOneBasedIndex()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -203,7 +203,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordReplaceText_ReturnsReplacementCount()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -227,7 +227,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordAddHeading_AndBulletedList_AreSearchable()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -251,7 +251,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void PowerPointSetTextStyle_BodySlotStylesAllBodyParagraphs()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
 
         try
@@ -282,7 +282,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordSetParagraphStyle_AppliesFormatting()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -315,7 +315,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordAddNumberedList_UsesDecimalDotByDefault()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -339,7 +339,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordAddStructuredList_SupportsNestedMixedKinds()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -370,7 +370,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordAppendParagraph_AppliesDefaultSpacing()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -399,7 +399,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordSetDocumentSpacingPreset_Comfortable_UpdatesParagraphSpacing()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -429,7 +429,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordInsertParagraphAfterText_InsertsAtExpectedPosition()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -452,7 +452,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordInsertTextAfterText_InsertsInline()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -475,7 +475,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordCreateOrUpdateStyle_AndApplyStyleByName_Work()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -498,7 +498,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordListStyles_IncludesBuiltInDefaultsOnNewDocument()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -521,7 +521,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordApplyStyleByName_ResolvesEnglishBuiltInName()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -543,7 +543,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordCreateOrUpdateStyle_CreatesCharacterStyle()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -567,7 +567,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordApplyCharacterStyleToText_AndListParagraphRuns_Work()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -590,7 +590,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordApplyCharacterStyleToText_UsesWholeWordMatching()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try
@@ -617,7 +617,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void WordGetParagraphInfo_ReturnsStyleAndSpacingFields()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
 
         try

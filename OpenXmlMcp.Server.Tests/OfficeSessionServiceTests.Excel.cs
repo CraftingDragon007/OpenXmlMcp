@@ -9,7 +9,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSession_SetAndGetCell_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -33,7 +33,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSession_AddWorksheet_UpdatesStructure()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -55,7 +55,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSession_AddWorksheetThenSetValue_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -77,7 +77,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSetRangeValues_AndGetUsedRange_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -102,7 +102,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSetRangeValues_InvalidJson_ReturnsHelpfulError()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -124,7 +124,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSetRangeValues_StringFormula_IsStoredAsFormula()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -145,7 +145,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSetFormula_AndGetFormula_Works()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -166,7 +166,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelSetCellStyle_AppliesStyleIndex()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -194,7 +194,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelGetCellInfo_ReturnsFormulaAndCachedValueFields()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
@@ -219,7 +219,7 @@ public partial class OfficeSessionServiceTests
     [Fact]
     public void ExcelGetCellStyle_ReturnsResolvedFontFields()
     {
-        var service = new OfficeSessionService();
+        var service = OfficeSessionServiceTestHelpers.CreateService();
         var filePath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
 
         try
