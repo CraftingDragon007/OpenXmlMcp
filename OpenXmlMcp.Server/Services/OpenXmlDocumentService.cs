@@ -1,11 +1,14 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using Ap = DocumentFormat.OpenXml.ExtendedProperties;
 
 namespace OpenXmlMcp.Server.Services;
 
 public class OpenXmlDocumentService
 {
-    public string CreateDocumentBase64(string title, string body)
+    private const string GeneratedByApplication = "OpenXmlMcp";
+
+    public string CreateDocumentBase64(string title, string body, string? creator = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
@@ -13,6 +16,15 @@ public class OpenXmlDocumentService
         using var stream = new MemoryStream();
         using (var document = WordprocessingDocument.Create(stream, DocumentFormat.OpenXml.WordprocessingDocumentType.Document, true))
         {
+            if (!string.IsNullOrWhiteSpace(creator))
+            {
+                document.PackageProperties.Creator = creator;
+                document.PackageProperties.LastModifiedBy = creator;
+            }
+            var appPart = document.ExtendedFilePropertiesPart ?? document.AddNewPart<ExtendedFilePropertiesPart>();
+            appPart.Properties ??= new Ap.Properties();
+            appPart.Properties.Application = new Ap.Application(GeneratedByApplication);
+            appPart.Properties.Save();
             var mainPart = document.AddMainDocumentPart();
             mainPart.Document = new Document(
                 new Body(

@@ -7,6 +7,67 @@ namespace OpenXmlMcp.Server.Tests;
 public partial class OfficeSessionServiceTests
 {
     [Fact]
+    public void CreateDocument_SetsApplicationMetadataToOpenXmlMcp()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var docxPath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+        var xlsxPath = OfficeSessionServiceTestHelpers.GetTempPath("xlsx");
+        var pptxPath = OfficeSessionServiceTestHelpers.GetTempPath("pptx");
+
+        try
+        {
+            var docxSession = service.CreateDocument(docxPath, "docx");
+            service.CloseDocument(docxSession);
+            using (var word = WordprocessingDocument.Open(docxPath, false))
+            {
+                Assert.Equal("OpenXmlMcp", word.ExtendedFilePropertiesPart?.Properties?.Application?.Text);
+            }
+
+            var xlsxSession = service.CreateDocument(xlsxPath, "xlsx");
+            service.CloseDocument(xlsxSession);
+            using (var excel = SpreadsheetDocument.Open(xlsxPath, false))
+            {
+                Assert.Equal("OpenXmlMcp", excel.ExtendedFilePropertiesPart?.Properties?.Application?.Text);
+            }
+
+            var pptxSession = service.CreateDocument(pptxPath, "pptx");
+            service.CloseDocument(pptxSession);
+            using (var presentation = PresentationDocument.Open(pptxPath, false))
+            {
+                Assert.Equal("OpenXmlMcp", presentation.ExtendedFilePropertiesPart?.Properties?.Application?.Text);
+            }
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(docxPath);
+            OfficeSessionServiceTestHelpers.DeleteIfExists(xlsxPath);
+            OfficeSessionServiceTestHelpers.DeleteIfExists(pptxPath);
+        }
+    }
+
+    [Fact]
+    public void CreateDocument_WithCreator_SetsCoreAuthorMetadata()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx", "LocalAgent-42");
+            service.CloseDocument(sessionId);
+
+            using var word = WordprocessingDocument.Open(filePath, false);
+            Assert.Equal("LocalAgent-42", word.PackageProperties.Creator);
+            Assert.Equal("LocalAgent-42", word.PackageProperties.LastModifiedBy);
+            Assert.Equal("OpenXmlMcp", word.ExtendedFilePropertiesPart?.Properties?.Application?.Text);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void GetDocumentInfo_ReturnsSessionPayload()
     {
         var service = OfficeSessionServiceTestHelpers.CreateService();

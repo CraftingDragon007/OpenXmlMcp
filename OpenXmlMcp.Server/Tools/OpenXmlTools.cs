@@ -10,9 +10,10 @@ internal class OpenXmlTools(OpenXmlDocumentService documentService)
     [Description("Creates a DOCX document and returns it as a base64 string.")]
     public string CreateDocxBase64(
         [Description("Document title for the first paragraph.")] string title,
-        [Description("Main content for the second paragraph.")] string body)
+        [Description("Main content for the second paragraph.")] string body,
+        [Description("Optional author/creator name written to core properties on creation only.")] string? creator = null)
     {
-        return documentService.CreateDocumentBase64(title, body);
+        return documentService.CreateDocumentBase64(title, body, creator);
     }
 
     [McpServerTool]

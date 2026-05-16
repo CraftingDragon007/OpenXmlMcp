@@ -3,6 +3,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OpenXmlMcp.Server.Models;
+using Ap = DocumentFormat.OpenXml.ExtendedProperties;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 
@@ -14,6 +15,7 @@ namespace OpenXmlMcp.Server.Services;
 /// </summary>
 public class PowerPointDocumentService(SessionManager sessionManager)
 {
+    private const string GeneratedByApplication = "OpenXmlMcp";
     private const int DefaultPptTitleFontSize = 4400;
     private const int DefaultPptBodyFontSize = 2800;
     private const string DefaultPptTitleFont = "Aptos Display";
@@ -292,9 +294,18 @@ public class PowerPointDocumentService(SessionManager sessionManager)
         presentationPart.Presentation?.Save();
     }
 
-    public void InitializeEmptyDocument(string filePath)
+    public void InitializeEmptyDocument(string filePath, string? creator = null)
     {
         using var presentation = PresentationDocument.Create(filePath, PresentationDocumentType.Presentation);
+        if (!string.IsNullOrWhiteSpace(creator))
+        {
+            presentation.PackageProperties.Creator = creator;
+            presentation.PackageProperties.LastModifiedBy = creator;
+        }
+        var appPart = presentation.ExtendedFilePropertiesPart ?? presentation.AddNewPart<ExtendedFilePropertiesPart>();
+        appPart.Properties ??= new Ap.Properties();
+        appPart.Properties.Application = new Ap.Application(GeneratedByApplication);
+        appPart.Properties.Save();
         var presentationPart = presentation.AddPresentationPart();
         presentationPart.Presentation = new Presentation();
         _ = EnsurePresentationDefaults(presentationPart);

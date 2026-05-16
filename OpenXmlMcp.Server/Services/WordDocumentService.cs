@@ -4,6 +4,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OpenXmlMcp.Server.Models;
+using Ap = DocumentFormat.OpenXml.ExtendedProperties;
 using W = DocumentFormat.OpenXml.Wordprocessing;
 
 namespace OpenXmlMcp.Server.Services;
@@ -14,6 +15,7 @@ namespace OpenXmlMcp.Server.Services;
 /// </summary>
 public class WordDocumentService(SessionManager sessionManager)
 {
+    private const string GeneratedByApplication = "OpenXmlMcp";
     private const int DefaultParagraphBeforePt = 0;
     private const int DefaultParagraphAfterPt = 8;
     private const double DefaultParagraphLineSpacing = 1.15;
@@ -2318,9 +2320,18 @@ public class WordDocumentService(SessionManager sessionManager)
         mainPart.Document?.Save();
     }
 
-    public void InitializeEmptyDocument(string filePath)
+    public void InitializeEmptyDocument(string filePath, string? creator = null)
     {
         using var word = WordprocessingDocument.Create(filePath, WordprocessingDocumentType.Document);
+        if (!string.IsNullOrWhiteSpace(creator))
+        {
+            word.PackageProperties.Creator = creator;
+            word.PackageProperties.LastModifiedBy = creator;
+        }
+        var appPart = word.ExtendedFilePropertiesPart ?? word.AddNewPart<ExtendedFilePropertiesPart>();
+        appPart.Properties ??= new Ap.Properties();
+        appPart.Properties.Application = new Ap.Application(GeneratedByApplication);
+        appPart.Properties.Save();
         var mainPart = word.AddMainDocumentPart();
         mainPart.Document = new Document(new Body());
         EnsureWordStyleInfrastructure(mainPart);

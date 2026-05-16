@@ -4,6 +4,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using OpenXmlMcp.Server.Models;
 using DocumentFormat.OpenXml;
+using Ap = DocumentFormat.OpenXml.ExtendedProperties;
 
 namespace OpenXmlMcp.Server.Services;
 
@@ -13,6 +14,7 @@ namespace OpenXmlMcp.Server.Services;
 /// </summary>
 public class ExcelDocumentService(SessionManager sessionManager)
 {
+    private const string GeneratedByApplication = "OpenXmlMcp";
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
@@ -443,9 +445,18 @@ public class ExcelDocumentService(SessionManager sessionManager)
         GetWorkbook(workbookPart).Save();
     }
 
-    public void InitializeEmptyDocument(string filePath)
+    public void InitializeEmptyDocument(string filePath, string? creator = null)
     {
         using var excel = SpreadsheetDocument.Create(filePath, SpreadsheetDocumentType.Workbook);
+        if (!string.IsNullOrWhiteSpace(creator))
+        {
+            excel.PackageProperties.Creator = creator;
+            excel.PackageProperties.LastModifiedBy = creator;
+        }
+        var appPart = excel.ExtendedFilePropertiesPart ?? excel.AddNewPart<ExtendedFilePropertiesPart>();
+        appPart.Properties ??= new Ap.Properties();
+        appPart.Properties.Application = new Ap.Application(GeneratedByApplication);
+        appPart.Properties.Save();
         var workbookPart = excel.AddWorkbookPart();
         workbookPart.Workbook = new Workbook();
         var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();

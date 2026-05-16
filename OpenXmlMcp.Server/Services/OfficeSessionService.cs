@@ -25,13 +25,13 @@ public class OfficeSessionService(
     public string OpenDocument(string filePath, bool readOnly = false)
         => sessionManager.OpenDocument(filePath, readOnly);
 
-    public string CreateDocument(string filePath, string documentType)
+    public string CreateDocument(string filePath, string documentType, string? creator = null)
     {
         var normalizedPath = System.IO.Path.GetFullPath(filePath);
         System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(normalizedPath) ?? System.IO.Directory.GetCurrentDirectory());
 
         var type = ParseDocumentType(documentType);
-        CreateEmptyDocument(normalizedPath, type);
+        CreateEmptyDocument(normalizedPath, type, creator);
 
         return sessionManager.OpenDocument(normalizedPath);
     }
@@ -489,7 +489,7 @@ public class OfficeSessionService(
     // Private helpers
     // -------------------------------------------------------------------------
 
-    private void CreateEmptyDocument(string filePath, OfficeDocumentType documentType)
+    private void CreateEmptyDocument(string filePath, OfficeDocumentType documentType, string? creator = null)
     {
         if (System.IO.File.Exists(filePath))
         {
@@ -499,13 +499,13 @@ public class OfficeSessionService(
         switch (documentType)
         {
             case OfficeDocumentType.Word:
-                wordService.InitializeEmptyDocument(filePath);
+                wordService.InitializeEmptyDocument(filePath, creator);
                 break;
             case OfficeDocumentType.Excel:
-                excelService.InitializeEmptyDocument(filePath);
+                excelService.InitializeEmptyDocument(filePath, creator);
                 break;
             case OfficeDocumentType.PowerPoint:
-                powerPointService.InitializeEmptyDocument(filePath);
+                powerPointService.InitializeEmptyDocument(filePath, creator);
                 break;
             default:
                 throw new InvalidOperationException("Unsupported document type.");

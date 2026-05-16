@@ -19,9 +19,10 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     [Description("Creates a new Office document and returns a session id.")]
     public string CreateDocument(
         [Description("Absolute or relative path for the new file.")] string filePath,
-        [Description("Document type: docx, xlsx, or pptx.")] string documentType)
+        [Description("Document type: docx, xlsx, or pptx.")] string documentType,
+        [Description("Optional author/creator name written to core properties on creation only.")] string? creator = null)
     {
-        return officeSessionService.CreateDocument(filePath, documentType);
+        return officeSessionService.CreateDocument(filePath, documentType, creator);
     }
 
     [McpServerTool]
