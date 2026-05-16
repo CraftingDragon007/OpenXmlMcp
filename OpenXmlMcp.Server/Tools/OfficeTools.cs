@@ -171,13 +171,34 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
-    [Description("Creates or updates a custom Word paragraph style from JSON options.")]
+    [Description("Creates or updates a custom Word paragraph or character style from JSON options.")]
     public string WordCreateOrUpdateStyle(
         [Description("Active DOCX session id.")] string sessionId,
         [Description("Custom style display name.")] string styleName,
         [Description("JSON options for style properties.")] string styleJson)
     {
         return officeSessionService.WordCreateOrUpdateStyle(sessionId, styleName, styleJson);
+    }
+
+    [McpServerTool]
+    [Description("Applies an existing Word character style to inline text by anchor match.")]
+    public string WordApplyCharacterStyleToText(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Anchor text sequence to search.")] string anchorText,
+        [Description("Character style id or style name.")] string styleName,
+        [Description("1-based occurrence of the anchor text.")] int occurrence = 1,
+        [Description("Use case-sensitive matching.")] bool matchCase = false)
+    {
+        return officeSessionService.WordApplyCharacterStyleToText(sessionId, anchorText, styleName, occurrence, matchCase);
+    }
+
+    [McpServerTool]
+    [Description("Lists run-level text and formatting details for a Word body paragraph.")]
+    public string WordListParagraphRuns(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("1-based body paragraph index.")] int paragraphIndex)
+    {
+        return officeSessionService.WordListParagraphRuns(sessionId, paragraphIndex);
     }
 
     [McpServerTool]

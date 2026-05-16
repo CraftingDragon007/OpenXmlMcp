@@ -46,6 +46,8 @@ internal static class OfficeOperationRegistry
             new("word_list_styles", OfficeDocumentType.Word, false),
             new("word_apply_style_by_name", OfficeDocumentType.Word, true),
             new("word_create_or_update_style", OfficeDocumentType.Word, true),
+            new("word_apply_character_style_to_text", OfficeDocumentType.Word, true),
+            new("word_list_paragraph_runs", OfficeDocumentType.Word, false),
             new("word_add_table", OfficeDocumentType.Word, true),
             new("word_set_table_cell", OfficeDocumentType.Word, true),
             new("word_get_table_cell", OfficeDocumentType.Word, false),

@@ -105,6 +105,21 @@ internal static class OfficeBatchDispatcher
                     sessionId,
                     payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
                     payload["styleJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleJson'.")),
+            ["word_apply_character_style_to_text"] = static (svc, sessionId, payload) =>
+                _ = svc.WordApplyCharacterStyleToText(
+                    sessionId,
+                    payload["anchorText"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'anchorText'."),
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
+                    payload["occurrence"]?.GetValue<int>() ?? 1,
+                    payload["matchCase"]?.GetValue<bool>() ?? false),
+            ["word_list_paragraph_runs"] = static (svc, sessionId, payload) =>
+                _ = svc.WordListParagraphRuns(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? 1),
+            ["word_get_paragraph_info"] = static (svc, sessionId, payload) =>
+                _ = svc.WordGetParagraphInfo(
+                    sessionId,
+                    payload["paragraphIndex"]?.GetValue<int>() ?? 1),
             ["word_list_styles"] = static (svc, sessionId, _) => _ = svc.WordListStyles(sessionId),
             ["excel_set_cell_value"] = static (svc, sessionId, payload) =>
                 _ = svc.ExcelSetCellValue(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."), payload["value"]?.GetValue<string>() ?? string.Empty),

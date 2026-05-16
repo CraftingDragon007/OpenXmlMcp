@@ -35,11 +35,49 @@ public class OfficeSessionService
     private const int DefaultPptBodyFontSize = 2800;
     private const string DefaultPptTitleFont = "Aptos Display";
     private const string DefaultPptBodyFont = "Aptos";
+    private static readonly IReadOnlyList<WordBuiltInStyleDefinition> WordBuiltInStyles = BuildWordBuiltInStyles();
     private readonly ConcurrentDictionary<string, OfficeSession> _sessions = new();
     private readonly ConcurrentDictionary<string, Stack<string>> _sessionSnapshots = new();
     private readonly ConcurrentDictionary<string, List<OperationLogEntry>> _sessionOperationLog = new();
     private readonly ConcurrentDictionary<string, object> _sessionWriteLocks = new();
     private const long MaxOpenFileSizeBytes = 20 * 1024 * 1024;
+
+    private static IReadOnlyList<WordBuiltInStyleDefinition> BuildWordBuiltInStyles()
+    {
+        var styles = new List<WordBuiltInStyleDefinition>
+        {
+            new("Normal", "Normal", "paragraph", IsDefault: true, UiPriority: 0, IsPrimary: true),
+            new("NoSpacing", "No Spacing", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 1, IsPrimary: true)
+        };
+
+        for (var level = 1; level <= 9; level++)
+        {
+            styles.Add(new WordBuiltInStyleDefinition($"Heading{level}", $"Heading {level}", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 9, IsPrimary: true));
+        }
+
+        styles.AddRange(
+        [
+            new("Title", "Title", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 10, IsPrimary: true),
+            new("Subtitle", "Subtitle", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 11, IsPrimary: true),
+            new("SubtleEmphasis", "Subtle Emphasis", "character", UiPriority: 19, IsPrimary: true),
+            new("Emphasis", "Emphasis", "character", UiPriority: 20, IsPrimary: true),
+            new("IntenseEmphasis", "Intense Emphasis", "character", UiPriority: 21, IsPrimary: true),
+            new("Strong", "Strong", "character", UiPriority: 22, IsPrimary: true),
+            new("Quote", "Quote", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 29, IsPrimary: true),
+            new("IntenseQuote", "Intense Quote", "paragraph", BasedOn: "Quote", NextStyle: "Normal", UiPriority: 30, IsPrimary: true),
+            new("SubtleReference", "Subtle Reference", "character", UiPriority: 31, IsPrimary: true),
+            new("IntenseReference", "Intense Reference", "character", UiPriority: 32, IsPrimary: true),
+            new("BookTitle", "Book Title", "character", UiPriority: 33, IsPrimary: true),
+            new("ListParagraph", "List Paragraph", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 34, IsPrimary: true),
+            new("Caption", "Caption", "paragraph", BasedOn: "Normal", NextStyle: "Normal", UiPriority: 35, IsPrimary: true),
+            new("Header", "Header", "paragraph", BasedOn: "Normal", NextStyle: "Normal", IsPrimary: false),
+            new("Footer", "Footer", "paragraph", BasedOn: "Normal", NextStyle: "Normal", IsPrimary: false),
+            new("FootnoteText", "Footnote Text", "paragraph", BasedOn: "Normal", NextStyle: "FootnoteText", IsPrimary: false),
+            new("EndnoteText", "Endnote Text", "paragraph", BasedOn: "Normal", NextStyle: "EndnoteText", IsPrimary: false)
+        ]);
+
+        return styles;
+    }
 
     public string OpenDocument(string filePath, bool readOnly = false)
     {
@@ -879,16 +917,46 @@ public class OfficeSessionService
         }
 
         using var document = WordprocessingDocument.Open(session.FilePath, false);
-        var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
-        var payload = styles.Select(style => new
-        {
-            styleId = style.StyleId?.Value ?? string.Empty,
-            name = style.StyleName?.Val?.Value ?? string.Empty,
-            type = ResolveWordStyleType(style),
-            isDefault = style.Default?.Value ?? false
-        }).ToArray();
+        var styles = (document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? []).ToList();
+        var builtInById = WordBuiltInStyles.ToDictionary<WordBuiltInStyleDefinition, string>(s => s.StyleId, StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var payload = new List<object>();
 
-        return JsonSerializer.Serialize(new { count = payload.Length, styles = payload });
+        foreach (var definition in WordBuiltInStyles)
+        {
+            var existing = styles.FirstOrDefault(s => string.Equals(s.StyleId?.Value, definition.StyleId, StringComparison.OrdinalIgnoreCase));
+            payload.Add(new
+            {
+                styleId = existing?.StyleId?.Value ?? definition.StyleId,
+                name = existing?.StyleName?.Val?.Value ?? definition.Name,
+                type = existing is not null ? ResolveWordStyleType(existing) : definition.Type,
+                isDefault = existing?.Default?.Value ?? definition.IsDefault,
+                isBuiltIn = true
+            });
+
+            seen.Add(definition.StyleId);
+        }
+
+        foreach (var style in styles)
+        {
+            var styleId = style.StyleId?.Value ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(styleId) || seen.Contains(styleId))
+            {
+                continue;
+            }
+
+            payload.Add(new
+            {
+                styleId,
+                name = style.StyleName?.Val?.Value ?? string.Empty,
+                type = ResolveWordStyleType(style),
+                isDefault = style.Default?.Value ?? false,
+                isBuiltIn = builtInById.ContainsKey(styleId)
+            });
+            seen.Add(styleId);
+        }
+
+        return JsonSerializer.Serialize(new { count = payload.Count, styles = payload });
     }
 
     public string WordApplyStyleByName(string sessionId, int paragraphIndex, string styleName)
@@ -898,23 +966,30 @@ public class OfficeSessionService
         ExecuteWriteOperation(session, "word_apply_style_by_name", () =>
         {
             using var document = WordprocessingDocument.Open(session.FilePath, true);
-            var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            EnsureWordStyleInfrastructure(mainPart);
+            var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
             var paragraphs = body.Elements<W.Paragraph>().ToList();
             if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
             {
                 throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
             }
 
-            var styles = document.MainDocumentPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
+            var styles = mainPart.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
             var style = styles.FirstOrDefault(s =>
                 string.Equals(s.StyleId?.Value, styleName, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(s.StyleName?.Val?.Value, styleName, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException($"Style '{styleName}' was not found in document.");
 
+            if (style.Type?.Value != W.StyleValues.Paragraph)
+            {
+                throw new InvalidOperationException($"Style '{styleName}' is not a paragraph style.");
+            }
+
             var paragraph = paragraphs[paragraphIndex - 1];
             var paragraphProperties = paragraph.ParagraphProperties ??= new W.ParagraphProperties();
             paragraphProperties.ParagraphStyleId = new W.ParagraphStyleId { Val = style.StyleId?.Value };
-            document.MainDocumentPart?.Document?.Save();
+            mainPart.Document?.Save();
         });
 
         return BuildMutationResult("word_apply_style_by_name", new { paragraphIndex, styleName });
@@ -929,36 +1004,175 @@ public class OfficeSessionService
         {
             using var document = WordprocessingDocument.Open(session.FilePath, true);
             var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
-            var stylePart = mainPart.StyleDefinitionsPart ?? mainPart.AddNewPart<StyleDefinitionsPart>();
-            stylePart.Styles ??= new W.Styles();
+            EnsureWordStyleInfrastructure(mainPart);
+            var stylePart = mainPart.StyleDefinitionsPart ?? throw new InvalidOperationException("Style definitions part is missing.");
+            var styles = stylePart.Styles ?? throw new InvalidOperationException("Styles are missing.");
+
+            var options = JsonNode.Parse(styleJson) as JsonObject ?? throw new InvalidOperationException("Invalid styleJson object.");
+            var requestedStyleType = ParseWordStyleType(options["type"]?.GetValue<string>() ?? "paragraph");
 
             var styleId = SanitizeStyleId(styleName);
-            var style = stylePart.Styles.Elements<W.Style>().FirstOrDefault(s => string.Equals(s.StyleId?.Value, styleId, StringComparison.OrdinalIgnoreCase));
+            var style = styles.Elements<W.Style>().FirstOrDefault(s => string.Equals(s.StyleId?.Value, styleId, StringComparison.OrdinalIgnoreCase));
             if (style is null)
             {
-                style = new W.Style { Type = W.StyleValues.Paragraph, StyleId = styleId, CustomStyle = true };
+                style = new W.Style { Type = requestedStyleType, StyleId = styleId, CustomStyle = true };
                 style.Append(new W.StyleName { Val = styleName });
-                style.Append(new W.BasedOn { Val = "Normal" });
-                style.Append(new W.NextParagraphStyle { Val = "Normal" });
+                if (requestedStyleType == W.StyleValues.Paragraph)
+                {
+                    style.Append(new W.BasedOn { Val = "Normal" });
+                    style.Append(new W.NextParagraphStyle { Val = "Normal" });
+                }
+
                 style.Append(new W.UIPriority { Val = 99 });
                 style.Append(new W.UnhideWhenUsed());
                 style.Append(new W.PrimaryStyle());
-                stylePart.Styles.Append(style);
+                styles.Append(style);
+            }
+            else if (style.Type?.Value is not null && style.Type.Value != requestedStyleType)
+            {
+                throw new InvalidOperationException($"Style '{styleName}' already exists with type '{ResolveWordStyleType(style)}'.");
             }
 
-            var options = JsonNode.Parse(styleJson) as JsonObject ?? throw new InvalidOperationException("Invalid styleJson object.");
-            ApplyStyleOptions(style, options);
+            ApplyStyleOptions(style, options, requestedStyleType);
             stylePart.Styles.Save();
             mainPart.Document?.Save();
         });
 
-        return BuildMutationResult("word_create_or_update_style", new { styleName, styleId = SanitizeStyleId(styleName) });
+        var parsedOptions = JsonNode.Parse(styleJson) as JsonObject;
+        var type = parsedOptions is null ? "paragraph" : ResolveWordStyleType(ParseWordStyleType(parsedOptions["type"]?.GetValue<string>() ?? "paragraph"));
+        return BuildMutationResult("word_create_or_update_style", new { styleName, styleId = SanitizeStyleId(styleName), type });
     }
 
     public string WordSetParagraphStyle(string sessionId, int paragraphIndex, string fontName, int fontSize, bool bold, bool italic, string colorHex)
     {
         WordSetParagraphStyle(sessionId, paragraphIndex, new TextStyle(fontName, fontSize, bold, italic, colorHex));
         return BuildMutationResult("word_set_paragraph_style", new { paragraphIndex });
+    }
+
+    public string WordApplyCharacterStyleToText(string sessionId, string anchorText, string styleName, int occurrence = 1, bool matchCase = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(anchorText);
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+        if (occurrence <= 0)
+        {
+            throw new InvalidOperationException("Occurrence must be greater than zero.");
+        }
+
+        var session = GetWritableSession(sessionId, OfficeDocumentType.Word);
+        ExecuteWriteOperation(session, "word_apply_character_style_to_text", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            EnsureWordStyleInfrastructure(mainPart);
+
+            var style = ResolveWordStyle(mainPart, styleName)
+                ?? throw new InvalidOperationException($"Style '{styleName}' was not found in document.");
+            if (style.Type?.Value != W.StyleValues.Character)
+            {
+                throw new InvalidOperationException($"Style '{styleName}' is not a character style.");
+            }
+
+            var paragraphs = mainPart.Document?.Body?.Descendants<W.Paragraph>() ?? throw new InvalidOperationException("Word document paragraphs are missing.");
+            var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var remainingOccurrence = occurrence;
+
+            foreach (var paragraph in paragraphs)
+            {
+                var segments = BuildParagraphRunSegments(paragraph).ToList();
+                if (segments.Count == 0)
+                {
+                    continue;
+                }
+
+                var paragraphText = string.Concat(segments.Select(s => s.Text));
+                var matches = FindWholeWordMatches(paragraphText, anchorText, comparison).ToList();
+                if (matches.Count == 0)
+                {
+                    continue;
+                }
+
+                if (remainingOccurrence > matches.Count)
+                {
+                    remainingOccurrence -= matches.Count;
+                    continue;
+                }
+
+                var match = matches[remainingOccurrence - 1];
+                var matchStart = match.Start;
+                var matchEnd = matchStart + match.Length;
+
+                foreach (var segment in segments)
+                {
+                    var segmentEnd = segment.Start + segment.Length;
+                    var overlapStart = Math.Max(matchStart, segment.Start);
+                    var overlapEnd = Math.Min(matchEnd, segmentEnd);
+                    if (overlapEnd <= overlapStart)
+                    {
+                        continue;
+                    }
+
+                    SplitRunAndApplyCharacterStyle(
+                        segment.Run,
+                        segment.Text,
+                        overlapStart - segment.Start,
+                        overlapEnd - overlapStart,
+                        style.StyleId?.Value ?? string.Empty);
+                }
+
+                mainPart.Document?.Save();
+                return;
+            }
+
+            throw new InvalidOperationException($"Anchor text '{anchorText}' occurrence {occurrence} was not found.");
+        });
+
+        return BuildMutationResult("word_apply_character_style_to_text", new { styleName, occurrence });
+    }
+
+    public string WordListParagraphRuns(string sessionId, int paragraphIndex)
+    {
+        var session = GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.Word)
+        {
+            throw new InvalidOperationException("Session document type is not Word.");
+        }
+
+        using var document = WordprocessingDocument.Open(session.FilePath, false);
+        var body = document.MainDocumentPart?.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+        var paragraphs = body.Elements<W.Paragraph>().ToList();
+        if (paragraphIndex < 1 || paragraphIndex > paragraphs.Count)
+        {
+            throw new InvalidOperationException(BuildWordBodyParagraphRangeMessage(body, paragraphIndex, paragraphs.Count));
+        }
+
+        var paragraph = paragraphs[paragraphIndex - 1];
+        var styleNameById = BuildWordStyleNameMap(document.MainDocumentPart);
+        var runs = paragraph.Elements<W.Run>().Select((run, index) =>
+        {
+            var runStyleId = run.RunProperties?.RunStyle?.Val?.Value ?? string.Empty;
+            var fontSizeText = run.RunProperties?.FontSize?.Val?.Value;
+            var fontSize = int.TryParse(fontSizeText, out var halfPoints) ? halfPoints / 2 : 0;
+            return new
+            {
+                runIndex = index + 1,
+                text = run.InnerText,
+                styleId = runStyleId,
+                styleName = runStyleId.Length > 0 && styleNameById.TryGetValue(runStyleId, out var resolvedName) ? resolvedName : string.Empty,
+                fontName = run.RunProperties?.RunFonts?.Ascii?.Value ?? string.Empty,
+                fontSize,
+                bold = run.RunProperties?.Bold is not null,
+                italic = run.RunProperties?.Italic is not null,
+                colorHex = run.RunProperties?.Color?.Val?.Value ?? string.Empty
+            };
+        }).ToArray();
+
+        return JsonSerializer.Serialize(new
+        {
+            paragraphIndex,
+            paragraphText = paragraph.InnerText,
+            runCount = runs.Length,
+            runs
+        });
     }
 
     public string ExcelSetCellStyle(string sessionId, string sheetName, string cellReference, string fontName, int fontSize, bool bold, bool italic, string colorHex)
@@ -1052,18 +1266,288 @@ public class OfficeSessionService
     {
         using var document = WordprocessingDocument.Open(filePath, true);
         var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+        EnsureWordStyleInfrastructure(mainPart);
+        mainPart.Document?.Save();
+    }
+
+    private static void EnsureWordStyleInfrastructure(MainDocumentPart mainPart)
+    {
         var stylePart = mainPart.StyleDefinitionsPart ?? mainPart.AddNewPart<StyleDefinitionsPart>();
         stylePart.Styles ??= new W.Styles();
 
-        if (!stylePart.Styles.Elements<W.DocDefaults>().Any())
+        EnsureWordDocDefaults(stylePart.Styles);
+        EnsureBuiltInWordStyles(stylePart.Styles);
+        stylePart.Styles.Save();
+    }
+
+    private static void EnsureWordDocDefaults(W.Styles styles)
+    {
+        if (styles.Elements<W.DocDefaults>().Any())
         {
-            stylePart.Styles.Append(new W.DocDefaults(
-                new W.RunPropertiesDefault(new W.RunPropertiesBaseStyle(
-                    new W.RunFonts { Ascii = "Calibri", HighAnsi = "Calibri" },
-                    new W.FontSize { Val = "22" }))));
+            return;
         }
 
-        stylePart.Styles.Save();
+        styles.Append(new W.DocDefaults(
+            new W.RunPropertiesDefault(new W.RunPropertiesBaseStyle(
+                new W.RunFonts { AsciiTheme = ThemeFontValues.MinorHighAnsi, HighAnsiTheme = ThemeFontValues.MinorHighAnsi, EastAsiaTheme = ThemeFontValues.MinorHighAnsi, ComplexScriptTheme = ThemeFontValues.MinorBidi },
+                new W.FontSize { Val = "22" },
+                new W.FontSizeComplexScript { Val = "22" })),
+            new W.ParagraphPropertiesDefault(new W.ParagraphPropertiesBaseStyle(
+                new W.SpacingBetweenLines
+                {
+                    Before = "0",
+                    After = "200",
+                    Line = "276",
+                    LineRule = W.LineSpacingRuleValues.Auto,
+                    BeforeAutoSpacing = OnOffValue.FromBoolean(false),
+                    AfterAutoSpacing = OnOffValue.FromBoolean(false)
+                }))));
+    }
+
+    private static void EnsureBuiltInWordStyles(W.Styles styles)
+    {
+        foreach (var definition in WordBuiltInStyles)
+        {
+            var existing = styles.Elements<W.Style>().FirstOrDefault(s => string.Equals(s.StyleId?.Value, definition.StyleId, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                if (existing.StyleName is null)
+                {
+                    existing.StyleName = new W.StyleName { Val = definition.Name };
+                }
+
+                if (existing.StyleParagraphProperties is null || existing.StyleRunProperties is null)
+                {
+                    ApplyBuiltInWordStyleFormatting(existing, definition.StyleId, onlyIfMissing: true);
+                }
+
+                continue;
+            }
+
+            styles.Append(BuildBuiltInWordStyle(definition));
+        }
+    }
+
+    private static W.Style BuildBuiltInWordStyle(WordBuiltInStyleDefinition definition)
+    {
+        var style = new W.Style
+        {
+            Type = ParseWordStyleType(definition.Type),
+            StyleId = definition.StyleId,
+            CustomStyle = false
+        };
+
+        style.Append(new W.StyleName { Val = definition.Name });
+        if (definition.IsDefault)
+        {
+            style.Default = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(definition.BasedOn))
+        {
+            style.Append(new W.BasedOn { Val = definition.BasedOn });
+        }
+
+        if (!string.IsNullOrWhiteSpace(definition.NextStyle) && string.Equals(definition.Type, "paragraph", StringComparison.OrdinalIgnoreCase))
+        {
+            style.Append(new W.NextParagraphStyle { Val = definition.NextStyle });
+        }
+
+        if (definition.UiPriority is not null)
+        {
+            style.Append(new W.UIPriority { Val = definition.UiPriority.Value });
+        }
+
+        if (definition.UnhideWhenUsed)
+        {
+            style.Append(new W.UnhideWhenUsed());
+        }
+
+        if (definition.IsPrimary)
+        {
+            style.Append(new W.PrimaryStyle());
+        }
+
+        ApplyBuiltInWordStyleFormatting(style, definition.StyleId, onlyIfMissing: false);
+
+        return style;
+    }
+
+    private static void ApplyBuiltInWordStyleFormatting(W.Style style, string styleId, bool onlyIfMissing)
+    {
+        if (!onlyIfMissing || style.StyleParagraphProperties is null)
+        {
+            style.StyleParagraphProperties = BuildBuiltInParagraphProperties(styleId);
+        }
+
+        if (!onlyIfMissing || style.StyleRunProperties is null)
+        {
+            style.StyleRunProperties = BuildBuiltInRunProperties(styleId);
+        }
+    }
+
+    private static W.StyleParagraphProperties BuildBuiltInParagraphProperties(string styleId)
+    {
+        styleId = styleId.Trim();
+        return styleId switch
+        {
+            "Heading1" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "360", After = "80" },
+                new W.OutlineLevel { Val = 0 }),
+            "Heading2" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "160", After = "80" },
+                new W.OutlineLevel { Val = 1 }),
+            "Heading3" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "160", After = "80" },
+                new W.OutlineLevel { Val = 2 }),
+            "Heading4" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "80", After = "40" },
+                new W.OutlineLevel { Val = 3 }),
+            "Heading5" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "80", After = "40" },
+                new W.OutlineLevel { Val = 4 }),
+            "Heading6" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "40", After = "0" },
+                new W.OutlineLevel { Val = 5 }),
+            "Heading7" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { Before = "40", After = "0" },
+                new W.OutlineLevel { Val = 6 }),
+            "Heading8" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { After = "0" },
+                new W.OutlineLevel { Val = 7 }),
+            "Heading9" => new W.StyleParagraphProperties(
+                new W.KeepNext(),
+                new W.KeepLines(),
+                new W.SpacingBetweenLines { After = "0" },
+                new W.OutlineLevel { Val = 8 }),
+            "Title" => new W.StyleParagraphProperties(
+                new W.SpacingBetweenLines { After = "80", Line = "240", LineRule = W.LineSpacingRuleValues.Auto },
+                new W.ContextualSpacing { Val = OnOffValue.FromBoolean(true) }),
+            "Subtitle" => new W.StyleParagraphProperties(),
+            "Quote" => new W.StyleParagraphProperties(
+                new W.SpacingBetweenLines { Before = "160" },
+                new W.Justification { Val = W.JustificationValues.Center }),
+            "IntenseQuote" => new W.StyleParagraphProperties(
+                new W.ParagraphBorders(
+                    new W.TopBorder { Val = W.BorderValues.Single, Color = "0F4761", Size = 4U, Space = 10U },
+                    new W.BottomBorder { Val = W.BorderValues.Single, Color = "0F4761", Size = 4U, Space = 10U }),
+                new W.SpacingBetweenLines { Before = "360", After = "360" },
+                new W.Indentation { Left = "864", Right = "864" },
+                new W.Justification { Val = W.JustificationValues.Center }),
+            "Caption" => new W.StyleParagraphProperties(
+                new W.SpacingBetweenLines { After = "200", Line = "240", LineRule = W.LineSpacingRuleValues.Auto }),
+            "NoSpacing" => new W.StyleParagraphProperties(
+                new W.SpacingBetweenLines { After = "0", Line = "240", LineRule = W.LineSpacingRuleValues.Auto }),
+            "ListParagraph" => new W.StyleParagraphProperties(
+                new W.Indentation { Left = "720" },
+                new W.ContextualSpacing { Val = OnOffValue.FromBoolean(true) }),
+            "Header" => new W.StyleParagraphProperties(
+                new W.SpacingBetweenLines { After = "0", Line = "240", LineRule = W.LineSpacingRuleValues.Auto }),
+            "Footer" => new W.StyleParagraphProperties(
+                new W.SpacingBetweenLines { After = "0", Line = "240", LineRule = W.LineSpacingRuleValues.Auto }),
+            _ => new W.StyleParagraphProperties()
+        };
+    }
+
+    private static W.StyleRunProperties BuildBuiltInRunProperties(string styleId)
+    {
+        styleId = styleId.Trim();
+        return styleId switch
+        {
+            "Heading1" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Color { Val = "0F4761" },
+                new W.FontSize { Val = "40" },
+                new W.FontSizeComplexScript { Val = "40" }),
+            "Heading2" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Color { Val = "0F4761" },
+                new W.FontSize { Val = "32" },
+                new W.FontSizeComplexScript { Val = "32" }),
+            "Heading3" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Color { Val = "0F4761" },
+                new W.FontSize { Val = "28" },
+                new W.FontSizeComplexScript { Val = "28" }),
+            "Heading4" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Italic(),
+                new W.Color { Val = "0F4761" }),
+            "Heading5" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Color { Val = "0F4761" }),
+            "Heading6" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Italic(),
+                new W.Color { Val = "595959" }),
+            "Heading7" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Color { Val = "595959" }),
+            "Heading8" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Italic(),
+                new W.Color { Val = "272727" }),
+            "Heading9" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.Italic(),
+                new W.Color { Val = "272727" }),
+            "Title" => new W.StyleRunProperties(
+                new W.RunFonts { Ascii = "Arial", HighAnsi = "Arial", EastAsia = "Arial", ComplexScript = "Arial" },
+                new W.FontSize { Val = "56" },
+                new W.FontSizeComplexScript { Val = "56" }),
+            "Subtitle" => new W.StyleRunProperties(
+                new W.Color { Val = "595959" },
+                new W.FontSize { Val = "28" },
+                new W.FontSizeComplexScript { Val = "28" }),
+            "Quote" => new W.StyleRunProperties(
+                new W.Italic(),
+                new W.Color { Val = "404040" }),
+            "IntenseQuote" => new W.StyleRunProperties(
+                new W.Italic(),
+                new W.Color { Val = "0F4761" }),
+            "SubtleEmphasis" => new W.StyleRunProperties(
+                new W.Italic(),
+                new W.Color { Val = "404040" }),
+            "Emphasis" => new W.StyleRunProperties(
+                new W.Italic()),
+            "IntenseEmphasis" => new W.StyleRunProperties(
+                new W.Italic(),
+                new W.Color { Val = "0F4761" }),
+            "Strong" => new W.StyleRunProperties(
+                new W.Bold()),
+            "SubtleReference" => new W.StyleRunProperties(
+                new W.SmallCaps(),
+                new W.Color { Val = "5A5A5A" }),
+            "IntenseReference" => new W.StyleRunProperties(
+                new W.Bold(),
+                new W.SmallCaps(),
+                new W.Color { Val = "0F4761" }),
+            "BookTitle" => new W.StyleRunProperties(
+                new W.Bold(),
+                new W.Italic()),
+            "Caption" => new W.StyleRunProperties(
+                new W.Italic(),
+                new W.Color { Val = "0E2841" },
+                new W.FontSize { Val = "18" },
+                new W.FontSizeComplexScript { Val = "18" }),
+            _ => new W.StyleRunProperties()
+        };
     }
 
     private static void ApplyExcelStylePreset(string filePath)
@@ -1342,7 +1826,11 @@ public class OfficeSessionService
 
     private static string ResolveWordStyleType(W.Style style)
     {
-        var type = style.Type?.Value;
+        return ResolveWordStyleType(style.Type?.Value);
+    }
+
+    private static string ResolveWordStyleType(W.StyleValues? type)
+    {
         if (type == W.StyleValues.Paragraph)
         {
             return "paragraph";
@@ -1364,6 +1852,16 @@ public class OfficeSessionService
         }
 
         return string.Empty;
+    }
+
+    private static W.StyleValues ParseWordStyleType(string type)
+    {
+        return type.Trim().ToLowerInvariant() switch
+        {
+            "paragraph" => W.StyleValues.Paragraph,
+            "character" => W.StyleValues.Character,
+            _ => throw new InvalidOperationException("Style type must be one of: paragraph, character.")
+        };
     }
 
     public string ExcelGetUsedRange(string sessionId, string sheetName)
@@ -2415,8 +2913,10 @@ public class OfficeSessionService
         return string.IsNullOrWhiteSpace(cleaned) ? $"Custom{Guid.NewGuid():N}" : cleaned;
     }
 
-    private static void ApplyStyleOptions(W.Style style, JsonObject options)
+    private static void ApplyStyleOptions(W.Style style, JsonObject options, W.StyleValues styleType)
     {
+        style.Type = styleType;
+
         if (!style.Elements<W.UnhideWhenUsed>().Any())
         {
             style.Append(new W.UnhideWhenUsed());
@@ -2432,8 +2932,16 @@ public class OfficeSessionService
             style.Append(new W.UIPriority { Val = 99 });
         }
 
-        var paragraphProperties = style.StyleParagraphProperties ??= new W.StyleParagraphProperties();
         var runProperties = style.StyleRunProperties ??= new W.StyleRunProperties();
+
+        var beforePt = options.TryGetPropertyValue("beforePt", out var beforeNode) && beforeNode is not null ? beforeNode.GetValue<int>() : 0;
+        var afterPt = options.TryGetPropertyValue("afterPt", out var afterNode) && afterNode is not null ? afterNode.GetValue<int>() : 0;
+        var lineSpacing = options.TryGetPropertyValue("lineSpacing", out var lineSpacingNode) && lineSpacingNode is not null ? lineSpacingNode.GetValue<double>() : 0;
+
+        if (styleType == W.StyleValues.Character && (beforePt > 0 || afterPt > 0 || lineSpacing > 0))
+        {
+            throw new InvalidOperationException("Character styles do not support paragraph spacing options.");
+        }
 
         if (options.TryGetPropertyValue("basedOn", out var basedOnNode) && basedOnNode is not null)
         {
@@ -2442,6 +2950,11 @@ public class OfficeSessionService
 
         if (options.TryGetPropertyValue("nextStyle", out var nextStyleNode) && nextStyleNode is not null)
         {
+            if (styleType != W.StyleValues.Paragraph)
+            {
+                throw new InvalidOperationException("Only paragraph styles support nextStyle.");
+            }
+
             style.NextParagraphStyle = new W.NextParagraphStyle { Val = nextStyleNode.GetValue<string>() };
         }
 
@@ -2477,11 +2990,9 @@ public class OfficeSessionService
             runProperties.Color = new W.Color { Val = color };
         }
 
-        var beforePt = options.TryGetPropertyValue("beforePt", out var beforeNode) && beforeNode is not null ? beforeNode.GetValue<int>() : 0;
-        var afterPt = options.TryGetPropertyValue("afterPt", out var afterNode) && afterNode is not null ? afterNode.GetValue<int>() : 0;
-        var lineSpacing = options.TryGetPropertyValue("lineSpacing", out var lineSpacingNode) && lineSpacingNode is not null ? lineSpacingNode.GetValue<double>() : 0;
         if (beforePt > 0 || afterPt > 0 || lineSpacing > 0)
         {
+            var paragraphProperties = style.StyleParagraphProperties ??= new W.StyleParagraphProperties();
             paragraphProperties.SpacingBetweenLines ??= new W.SpacingBetweenLines();
             if (beforePt >= 0)
             {
@@ -2970,6 +3481,129 @@ public class OfficeSessionService
         return result.ToString();
     }
 
+    private static IEnumerable<WordRunSegment> BuildParagraphRunSegments(W.Paragraph paragraph)
+    {
+        var offset = 0;
+        foreach (var run in paragraph.Descendants<W.Run>())
+        {
+            var text = run.InnerText;
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            yield return new WordRunSegment(run, offset, text.Length, text);
+            offset += text.Length;
+        }
+    }
+
+    private static List<(int Start, int Length)> FindWholeWordMatches(string text, string query, StringComparison comparison)
+    {
+        var matches = new List<(int Start, int Length)>();
+        var startIndex = 0;
+        while (true)
+        {
+            var index = text.IndexOf(query, startIndex, comparison);
+            if (index < 0)
+            {
+                break;
+            }
+
+            var endIndex = index + query.Length;
+            var leftBoundary = index == 0 || !IsWordChar(text[index - 1]);
+            var rightBoundary = endIndex == text.Length || !IsWordChar(text[endIndex]);
+            if (leftBoundary && rightBoundary)
+            {
+                matches.Add((index, query.Length));
+            }
+
+            startIndex = index + Math.Max(1, query.Length);
+        }
+
+        return matches;
+    }
+
+    private static bool IsWordChar(char c)
+    {
+        return char.IsLetterOrDigit(c) || c == '_';
+    }
+
+    private static W.Style? ResolveWordStyle(MainDocumentPart mainPart, string styleName)
+    {
+        var styles = mainPart.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
+        return styles.FirstOrDefault(s =>
+            string.Equals(s.StyleId?.Value, styleName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(s.StyleName?.Val?.Value, styleName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static Dictionary<string, string> BuildWordStyleNameMap(MainDocumentPart? mainPart)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var definition in WordBuiltInStyles)
+        {
+            map[definition.StyleId] = definition.Name;
+        }
+
+        var styles = mainPart?.StyleDefinitionsPart?.Styles?.Elements<W.Style>() ?? [];
+        foreach (var style in styles)
+        {
+            var styleId = style.StyleId?.Value;
+            if (string.IsNullOrWhiteSpace(styleId))
+            {
+                continue;
+            }
+
+            map[styleId] = style.StyleName?.Val?.Value ?? styleId;
+        }
+
+        return map;
+    }
+
+    private static void SplitRunAndApplyCharacterStyle(W.Run run, string text, int matchStart, int matchLength, string styleId)
+    {
+        var beforeText = text[..matchStart];
+        var matchText = text.Substring(matchStart, matchLength);
+        var afterText = text[(matchStart + matchLength)..];
+
+        if (beforeText.Length > 0)
+        {
+            run.InsertBeforeSelf(BuildRunCloneWithText(run, beforeText));
+        }
+
+        run.InsertBeforeSelf(BuildRunCloneWithText(run, matchText, styleId));
+
+        if (afterText.Length > 0)
+        {
+            run.InsertBeforeSelf(BuildRunCloneWithText(run, afterText));
+        }
+
+        run.Remove();
+    }
+
+    private static W.Run BuildRunCloneWithText(W.Run template, string text, string? runStyleId = null)
+    {
+        var clone = new W.Run();
+        if (template.RunProperties is not null)
+        {
+            clone.RunProperties = (W.RunProperties)template.RunProperties.CloneNode(true);
+        }
+
+        if (!string.IsNullOrWhiteSpace(runStyleId))
+        {
+            clone.RunProperties ??= new W.RunProperties();
+            clone.RunProperties.RunStyle = new W.RunStyle { Val = runStyleId };
+        }
+
+        var textNode = new W.Text(text);
+        if (text.StartsWith(' ') || text.EndsWith(' '))
+        {
+            textNode.Space = SpaceProcessingModeValues.Preserve;
+        }
+
+        clone.Append(textNode);
+        return clone;
+    }
+
     private static ListNumberingDefinitions EnsureStructuredListNumbering(WordprocessingDocument document, IReadOnlyCollection<WordListItem> items)
     {
         var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
@@ -3265,6 +3899,8 @@ public class OfficeSessionService
                 {
                     var mainPart = word.AddMainDocumentPart();
                     mainPart.Document = new Document(new Body());
+                    EnsureWordStyleInfrastructure(mainPart);
+                    mainPart.Document.Save();
                 }
                 break;
             case OfficeDocumentType.Excel:
@@ -3446,6 +4082,19 @@ public class OfficeSessionService
 
         return $"{column}{rowIndex}";
     }
+
+    private sealed record WordBuiltInStyleDefinition(
+        string StyleId,
+        string Name,
+        string Type,
+        bool IsDefault = false,
+        string? BasedOn = null,
+        string? NextStyle = null,
+        int? UiPriority = null,
+        bool IsPrimary = false,
+        bool UnhideWhenUsed = true);
+
+    private sealed record WordRunSegment(W.Run Run, int Start, int Length, string Text);
 
     private sealed record ListNumberingDefinitions(int NumberedNumberingId, int BulletedNumberingId);
     private sealed record OperationLogEntry(DateTimeOffset TimestampUtc, string CanonicalOperationName, string PublicOperationName, string Message)

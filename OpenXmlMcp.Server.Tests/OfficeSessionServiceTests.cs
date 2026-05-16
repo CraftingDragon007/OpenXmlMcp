@@ -1453,6 +1453,130 @@ public class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordListStyles_IncludesBuiltInDefaultsOnNewDocument()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var stylesPayload = service.WordListStyles(sessionId);
+
+            Assert.Contains("\"styleId\":\"Normal\"", stylesPayload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"styleId\":\"Heading1\"", stylesPayload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"styleId\":\"NoSpacing\"", stylesPayload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"styleId\":\"Strong\"", stylesPayload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordApplyStyleByName_ResolvesEnglishBuiltInName()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Heading paragraph");
+            service.WordApplyStyleByName(sessionId, 1, "Heading 2");
+
+            var infoPayload = service.WordGetParagraphInfo(sessionId, 1);
+            Assert.Contains("\"styleId\":\"Heading2\"", infoPayload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordCreateOrUpdateStyle_CreatesCharacterStyle()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var payload = service.WordCreateOrUpdateStyle(sessionId, "CalloutInline", "{\"type\":\"character\",\"fontName\":\"Calibri\",\"bold\":true}");
+
+            Assert.Contains("\"type\":\"character\"", payload, StringComparison.OrdinalIgnoreCase);
+
+            var stylesPayload = service.WordListStyles(sessionId);
+            Assert.Contains("\"styleId\":\"CalloutInline\"", stylesPayload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"type\":\"character\"", stylesPayload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordApplyCharacterStyleToText_AndListParagraphRuns_Work()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "alpha beta gamma");
+            service.WordApplyCharacterStyleToText(sessionId, "beta", "Strong");
+
+            var runPayload = service.WordListParagraphRuns(sessionId, 1);
+            Assert.Contains("\"runCount\":3", runPayload, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"styleId\":\"Strong\"", runPayload, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordApplyCharacterStyleToText_UsesWholeWordMatching()
+    {
+        var service = new OfficeSessionService();
+        var filePath = GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendParagraph(sessionId, "Parameters Parameter");
+            service.WordApplyCharacterStyleToText(sessionId, "Parameter", "Strong");
+
+            var runPayload = service.WordListParagraphRuns(sessionId, 1);
+            using var parsed = JsonDocument.Parse(runPayload);
+            var runs = parsed.RootElement.GetProperty("runs").EnumerateArray().ToArray();
+            Assert.Equal("Parameters ", runs[0].GetProperty("text").GetString());
+            Assert.Equal(string.Empty, runs[0].GetProperty("styleId").GetString());
+            Assert.Equal("Parameter", runs[1].GetProperty("text").GetString());
+            Assert.Equal("Strong", runs[1].GetProperty("styleId").GetString());
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void MutationOperations_ReturnStructuredPayload()
     {
         var service = new OfficeSessionService();

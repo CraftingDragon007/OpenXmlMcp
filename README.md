@@ -50,10 +50,10 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 
 - Content: `word_append_paragraph`, `word_insert_paragraph_at`, `word_insert_paragraph_after_text`, `word_insert_text_after_text`, `word_replace_text`, `word_add_heading`, `word_add_table`
 - Table cells: `word_set_table_cell`, `word_get_table_cell`
-- Readback: `word_get_paragraph_info`
+- Readback: `word_get_paragraph_info`, `word_list_paragraph_runs`
 - Lists: `word_add_bulleted_list`, `word_add_numbered_list`, `word_add_structured_list`
 - Formatting: `word_set_paragraph_style`, `word_set_paragraph_spacing`, `word_set_document_spacing_preset`
-- Styles: `word_list_styles`, `word_apply_style_by_name`, `word_create_or_update_style`
+- Styles: `word_list_styles`, `word_apply_style_by_name`, `word_create_or_update_style`, `word_apply_character_style_to_text`
 
 ## Excel
 
@@ -85,6 +85,8 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 - Batch failures include `operation`, `index`, `errorCode`, and `error`.
 - PPTX defaults are generated programmatically (no embedded template dependency).
 - Mutating tools return a structured result payload (`ok`, `changed`, `operation`, `target`).
+
+Word note: new DOCX documents are initialized with a stable built-in style set (for example `Normal`, `NoSpacing`, `Heading 1`..`Heading 9`, `Title`, `Subtitle`, `Strong`). `word_create_or_update_style` supports `type` in `styleJson` (`paragraph` or `character`; defaults to `paragraph`).
 
 Excel note: formulas are stored and retrievable, but not calculated server-side; formula cells may not have a cached value until recalculated by a spreadsheet client. The server now marks workbook calculation properties to force recalculation on open in spreadsheet clients.
 
