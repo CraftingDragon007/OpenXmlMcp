@@ -336,6 +336,68 @@ public partial class OfficeSessionServiceTests
             OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void WordAddNumberedList_SeparateCallsUseDifferentNumberingInstances()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddNumberedList(sessionId, "One\nTwo");
+            service.WordAddHeading(sessionId, 2, "Break");
+            service.WordAddNumberedList(sessionId, "Three\nFour");
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var numberedParagraphs = document.MainDocumentPart?.Document?.Body?
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                .Where(p => p.ParagraphProperties?.NumberingProperties?.NumberingId is not null)
+                .ToList() ?? [];
+
+            Assert.True(numberedParagraphs.Count >= 4);
+
+            var firstListNumId = numberedParagraphs[0].ParagraphProperties!.NumberingProperties!.NumberingId!.Val!.Value;
+            var secondListNumId = numberedParagraphs[2].ParagraphProperties!.NumberingProperties!.NumberingId!.Val!.Value;
+            Assert.NotEqual(firstListNumId, secondListNumId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordListStructure_DistinguishesNumberedAndBulletedKinds()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddNumberedList(sessionId, "One\nTwo");
+            service.WordAddBulletedList(sessionId, "Alpha\nBeta");
+
+            var structureJson = service.ListStructure(sessionId);
+            using var doc = JsonDocument.Parse(structureJson);
+            var elements = doc.RootElement.GetProperty("elements").EnumerateArray().ToArray();
+
+            var numbered = elements.Where(e => e.TryGetProperty("text", out var t) && (t.GetString() == "One" || t.GetString() == "Two")).ToArray();
+            var bulleted = elements.Where(e => e.TryGetProperty("text", out var t) && (t.GetString() == "Alpha" || t.GetString() == "Beta")).ToArray();
+
+            Assert.All(numbered, e => Assert.Equal("numbered", e.GetProperty("listKind").GetString()));
+            Assert.All(bulleted, e => Assert.Equal("bulleted", e.GetProperty("listKind").GetString()));
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
     [Fact]
     public void WordAddStructuredList_SupportsNestedMixedKinds()
     {
@@ -1054,6 +1116,60 @@ public partial class OfficeSessionServiceTests
             Assert.Contains("\"matchCount\":1", find, StringComparison.OrdinalIgnoreCase);
 
             service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAppendMarkdown_StrayPipeLinesDoNotCreateTables()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        var markdown = "Install path | optional\nAnother line with | single pipe";
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendMarkdown(sessionId, markdown);
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("\"tableCount\":0", structure, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAppendMarkdown_JoinsWrappedLinesIntoSingleParagraph()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        var markdown = "This is a wrapped\nline that should stay\nin one paragraph.\n\nNext paragraph.";
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendMarkdown(sessionId, markdown);
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var paragraphs = document.MainDocumentPart?.Document?.Body?
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                .Select(p => p.InnerText)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList() ?? [];
+
+            Assert.Contains("This is a wrapped line that should stay in one paragraph.", paragraphs);
+            Assert.Contains("Next paragraph.", paragraphs);
         }
         finally
         {

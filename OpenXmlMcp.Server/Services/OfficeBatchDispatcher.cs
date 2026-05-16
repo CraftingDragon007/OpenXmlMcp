@@ -52,7 +52,7 @@ internal static class OfficeBatchDispatcher
                 _ = svc.WordSetTableValues(
                     sessionId,
                     payload["tableIndex"]?.GetValue<int>() ?? throw new InvalidOperationException("Missing 'tableIndex'."),
-                    payload["valuesJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'valuesJson'."),
+                    GetJsonArgumentAsString(payload, "valuesJson"),
                     payload["startRow"]?.GetValue<int>() ?? 1,
                     payload["startColumn"]?.GetValue<int>() ?? 1),
             ["word_add_table"] = static (svc, sessionId, payload) =>
@@ -248,7 +248,7 @@ internal static class OfficeBatchDispatcher
                     payload["italic"]?.GetValue<bool>() ?? false,
                     payload["colorHex"]?.GetValue<string>() ?? "000000"),
             ["excel_set_range_values"] = static (svc, sessionId, payload) =>
-                _ = svc.ExcelSetRangeValues(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["startCell"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'startCell'."), payload["valuesJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'valuesJson'.")),
+                _ = svc.ExcelSetRangeValues(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["startCell"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'startCell'."), GetJsonArgumentAsString(payload, "valuesJson")),
             ["excel_set_formula"] = static (svc, sessionId, payload) =>
                 _ = svc.ExcelSetFormula(sessionId, payload["sheetName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'sheetName'."), payload["cellReference"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'cellReference'."), payload["formula"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'formula'.")),
             ["excel_add_worksheet"] = static (svc, sessionId, payload) =>
@@ -298,5 +298,16 @@ internal static class OfficeBatchDispatcher
                     payload["preset"]?.GetValue<string>() ?? "default",
                     payload["targetIndex"]?.GetValue<int>() ?? 1)
         };
+    }
+
+    private static string GetJsonArgumentAsString(JsonNode payload, string propertyName)
+    {
+        var node = payload[propertyName] ?? throw new InvalidOperationException($"Missing '{propertyName}'.");
+        if (node is JsonValue value && value.TryGetValue<string>(out var stringValue))
+        {
+            return stringValue;
+        }
+
+        return node.ToJsonString();
     }
 }

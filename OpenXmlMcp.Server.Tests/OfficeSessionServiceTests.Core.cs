@@ -107,6 +107,34 @@ public partial class OfficeSessionServiceTests
             OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
         }
     }
+
+    [Fact]
+    public void BatchExecute_WordSetTableValues_AcceptsNativeJsonArrayPayload()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var operations = "[" +
+                "{\"operation\":\"word_add_table\",\"rows\":2,\"columns\":2}," +
+                "{\"operation\":\"word_set_table_values\",\"tableIndex\":1,\"valuesJson\":[[\"A\",\"B\"],[\"1\",\"2\"]]}" +
+                "]";
+
+            var payload = service.BatchExecute(sessionId, operations);
+            Assert.Contains("\"failed\":0", payload, StringComparison.OrdinalIgnoreCase);
+
+            var cell = service.WordGetTableCell(sessionId, 1, 2, 2);
+            Assert.Equal("2", cell);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
     [Fact]
     public void BatchExecute_InvalidPayload_ReturnsHelpfulErrorCode()
     {

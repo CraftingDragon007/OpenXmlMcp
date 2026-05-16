@@ -1973,15 +1973,15 @@ public class WordDocumentService(SessionManager sessionManager)
             {
                 var level = headingMatch.Groups[1].Value.Length;
                 var text = headingMatch.Groups[2].Value.Trim();
-                var para = new W.Paragraph(
+                var headingParagraph = new W.Paragraph(
                     new W.ParagraphProperties(new W.ParagraphStyleId { Val = $"Heading{level}" }),
                     new W.Run(new W.Text(text)));
-                elements.Add(para);
+                elements.Add(headingParagraph);
                 i++;
                 continue;
             }
 
-            // Markdown table
+            // Markdown table (strict: header row + separator row required)
             if (line.TrimStart().StartsWith("|", StringComparison.Ordinal))
             {
                 var tableLines = new List<string>();
@@ -1991,7 +1991,19 @@ public class WordDocumentService(SessionManager sessionManager)
                     i++;
                 }
                 var table = BuildMarkdownTable(tableLines);
-                if (table is not null) elements.Add(table);
+                if (table is not null)
+                {
+                    elements.Add(table);
+                    continue;
+                }
+
+                // Not a valid markdown table; preserve source as normal text paragraphs.
+                foreach (var tableLikeLine in tableLines)
+                {
+                    var fallbackParagraph = new W.Paragraph();
+                    AppendInlineMarkdown(fallbackParagraph, tableLikeLine);
+                    elements.Add(fallbackParagraph);
+                }
                 continue;
             }
 
@@ -2025,13 +2037,13 @@ public class WordDocumentService(SessionManager sessionManager)
                 {
                     var kind = NormalizeListKind(item.Kind);
                     var numId = kind == "numbered" ? listDefs.NumberedNumberingId : listDefs.BulletedNumberingId;
-                    var para = new W.Paragraph(
+                    var listParagraph = new W.Paragraph(
                         new W.ParagraphProperties(
                             new W.NumberingProperties(
                                 new W.NumberingLevelReference { Val = item.Level },
                                 new W.NumberingId { Val = numId })));
-                    AppendInlineMarkdown(para, item.Text);
-                    elements.Add(para);
+                    AppendInlineMarkdown(listParagraph, item.Text);
+                    elements.Add(listParagraph);
                 }
                 continue;
             }
@@ -2057,13 +2069,13 @@ public class WordDocumentService(SessionManager sessionManager)
                 {
                     var kind = NormalizeListKind(item.Kind);
                     var numId = kind == "numbered" ? listDefs.NumberedNumberingId : listDefs.BulletedNumberingId;
-                    var para = new W.Paragraph(
+                    var listParagraph = new W.Paragraph(
                         new W.ParagraphProperties(
                             new W.NumberingProperties(
                                 new W.NumberingLevelReference { Val = item.Level },
                                 new W.NumberingId { Val = numId })));
-                    AppendInlineMarkdown(para, item.Text);
-                    elements.Add(para);
+                    AppendInlineMarkdown(listParagraph, item.Text);
+                    elements.Add(listParagraph);
                 }
                 continue;
             }
@@ -2075,13 +2087,35 @@ public class WordDocumentService(SessionManager sessionManager)
                 continue;
             }
 
-            // Normal paragraph with inline markdown
+            // Normal paragraph with inline markdown.
+            // Join wrapped source lines until a markdown block boundary or blank line.
+            var paragraphLines = new List<string>();
+            while (i < lines.Length)
             {
-                var para = new W.Paragraph();
-                AppendInlineMarkdown(para, line);
-                elements.Add(para);
+                var candidate = lines[i];
+                if (string.IsNullOrWhiteSpace(candidate)
+                    || System.Text.RegularExpressions.Regex.IsMatch(candidate, @"^(#{1,9})\s+(.+)$")
+                    || System.Text.RegularExpressions.Regex.IsMatch(candidate, @"^(\s*)[-*+]\s+(.+)$")
+                    || System.Text.RegularExpressions.Regex.IsMatch(candidate, @"^(\s*)\d+\.\s+(.+)$")
+                    || candidate.TrimStart().StartsWith("|", StringComparison.Ordinal)
+                    || candidate.TrimStart().StartsWith("```", StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                paragraphLines.Add(candidate.Trim());
                 i++;
             }
+
+            if (paragraphLines.Count == 0)
+            {
+                i++;
+                continue;
+            }
+
+            var paragraph = new W.Paragraph();
+            AppendInlineMarkdown(paragraph, string.Join(" ", paragraphLines));
+            elements.Add(paragraph);
         }
 
         return elements;
@@ -2089,13 +2123,33 @@ public class WordDocumentService(SessionManager sessionManager)
 
     private static W.Table? BuildMarkdownTable(List<string> tableLines)
     {
-        // Parse cells, skip separator row (--|-- pattern)
-        var rows = tableLines
-            .Where(l => !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\|[\s\-|:]+\|?\s*$"))
-            .Select(l => l.Trim().Trim('|').Split('|').Select(c => c.Trim()).ToArray())
-            .ToList();
+        if (tableLines.Count < 2)
+        {
+            return null;
+        }
 
-        if (rows.Count == 0) return null;
+        var headerCells = SplitMarkdownTableRow(tableLines[0]);
+        if (headerCells.Length < 2)
+        {
+            return null;
+        }
+
+        if (!IsMarkdownTableSeparatorRow(tableLines[1], headerCells.Length))
+        {
+            return null;
+        }
+
+        var rows = new List<string[]> { headerCells };
+        for (var index = 2; index < tableLines.Count; index++)
+        {
+            var cells = SplitMarkdownTableRow(tableLines[index]);
+            if (cells.Length != headerCells.Length)
+            {
+                return null;
+            }
+
+            rows.Add(cells);
+        }
 
         var table = new W.Table();
         var colCount = rows[0].Length;
@@ -2124,6 +2178,22 @@ public class WordDocumentService(SessionManager sessionManager)
         }
 
         return table;
+    }
+
+    private static string[] SplitMarkdownTableRow(string line)
+    {
+        return line.Trim().Trim('|').Split('|').Select(c => c.Trim()).ToArray();
+    }
+
+    private static bool IsMarkdownTableSeparatorRow(string line, int expectedColumns)
+    {
+        var cells = SplitMarkdownTableRow(line);
+        if (cells.Length != expectedColumns)
+        {
+            return false;
+        }
+
+        return cells.All(cell => System.Text.RegularExpressions.Regex.IsMatch(cell, @"^:?-{3,}:?$"));
     }
 
     private static void AppendInlineMarkdown(W.Paragraph para, string text)
@@ -2260,12 +2330,14 @@ public class WordDocumentService(SessionManager sessionManager)
     public object ListStructure(string filePath)
     {
         using var document = WordprocessingDocument.Open(filePath, false);
-        var body = document.MainDocumentPart?.Document?.Body;
+        var mainPart = document.MainDocumentPart;
+        var body = mainPart?.Document?.Body;
         if (body is null)
         {
             return new { paragraphCount = 0, bodyParagraphCount = 0, tableCount = 0, elements = Array.Empty<object>(), tables = Array.Empty<object>() };
         }
 
+        var listKindByNumberingId = BuildListKindMap(mainPart!);
         var paragraphs = GetWordParagraphReferences(body);
         var tableSummaries = BuildWordTableSummaries(body).ToArray();
         var elements = new List<object>();
@@ -2286,7 +2358,7 @@ public class WordDocumentService(SessionManager sessionManager)
                     allParagraphIndex = reference?.AllParagraphIndex,
                     headingLevel,
                     isListItem = numberingId.HasValue,
-                    listKind = numberingId.HasValue ? (numberingId.Value == 1 ? "numbered" : "bulleted") : string.Empty,
+                    listKind = numberingId.HasValue ? ResolveListKind(listKindByNumberingId, numberingId.Value) : string.Empty,
                     listLevel,
                     numberingId,
                     text = paragraph.InnerText,
@@ -2839,8 +2911,8 @@ public class WordDocumentService(SessionManager sessionManager)
 
         const int numberedAbstractId = 901;
         const int bulletedAbstractId = 902;
-        const int numberedNumberingId = 901;
-        const int bulletedNumberingId = 902;
+        var numberedNumberingId = GetNextWordNumberingInstanceId(numbering);
+        var bulletedNumberingId = numberedNumberingId + 1;
 
         var maxLevel = items.Max(x => x.Level);
         EnsureAbstractNumbering(numbering, numberedAbstractId, maxLevel, isNumbered: true, items);
@@ -2875,6 +2947,18 @@ public class WordDocumentService(SessionManager sessionManager)
         var existing = numbering.Elements<W.NumberingInstance>().FirstOrDefault(n => n.NumberID?.Value == numberingId);
         existing?.Remove();
         numbering.Append(new W.NumberingInstance(new W.AbstractNumId { Val = abstractId }) { NumberID = numberingId });
+    }
+
+    private static int GetNextWordNumberingInstanceId(W.Numbering numbering)
+    {
+        var maxExisting = numbering.Elements<W.NumberingInstance>()
+            .Select(n => n.NumberID?.Value)
+            .Where(v => v.HasValue)
+            .Select(v => v!.Value)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return Math.Max(1000, maxExisting + 1);
     }
 
     private static W.Level BuildListLevel(int level, string style, bool isNumbered)
@@ -3070,6 +3154,42 @@ public class WordDocumentService(SessionManager sessionManager)
         }
 
         return null;
+    }
+
+    private static Dictionary<int, string> BuildListKindMap(MainDocumentPart mainPart)
+    {
+        var map = new Dictionary<int, string>();
+        var numbering = mainPart.NumberingDefinitionsPart?.Numbering;
+        if (numbering is null)
+        {
+            return map;
+        }
+
+        var abstractById = numbering.Elements<W.AbstractNum>()
+            .Where(x => x.AbstractNumberId?.Value is not null)
+            .ToDictionary(x => x.AbstractNumberId!.Value!, x => x);
+
+        foreach (var instance in numbering.Elements<W.NumberingInstance>())
+        {
+            var numId = instance.NumberID?.Value;
+            var abstractId = instance.AbstractNumId?.Val?.Value;
+            if (!numId.HasValue || !abstractId.HasValue || !abstractById.TryGetValue(abstractId.Value, out var abstractNum))
+            {
+                continue;
+            }
+
+            var firstLevel = abstractNum.Elements<W.Level>().OrderBy(l => l.LevelIndex?.Value ?? 0).FirstOrDefault();
+            var format = firstLevel?.NumberingFormat?.Val?.Value;
+            var resolvedNumId = numId.Value;
+            map[resolvedNumId] = format == W.NumberFormatValues.Bullet ? "bulleted" : "numbered";
+        }
+
+        return map;
+    }
+
+    private static string ResolveListKind(IReadOnlyDictionary<int, string> listKindByNumberingId, int numberingId)
+    {
+        return listKindByNumberingId.TryGetValue(numberingId, out var kind) ? kind : "numbered";
     }
 
     private static IEnumerable<WordRunSegment> BuildParagraphRunSegments(W.Paragraph paragraph)
