@@ -2016,20 +2016,14 @@ public class WordDocumentService(SessionManager sessionManager)
                 var indent = ulMatch.Groups[1].Value.Length / 2;
                 var text = ulMatch.Groups[2].Value;
                 var listItems = new List<WordListItem> { new WordListItem(text, indent, "bulleted") };
-                // collect continuation items
+                // Collect only bulleted continuation items. Switching list kind starts a new block.
                 i++;
                 while (i < lines.Length)
                 {
                     var nextUl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)[-*+]\s+(.+)$");
-                    var nextOl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)\d+\.\s+(.+)$");
                     if (nextUl.Success)
                     {
                         listItems.Add(new WordListItem(nextUl.Groups[2].Value, nextUl.Groups[1].Value.Length / 2, "bulleted"));
-                        i++;
-                    }
-                    else if (nextOl.Success)
-                    {
-                        listItems.Add(new WordListItem(nextOl.Groups[2].Value, nextOl.Groups[1].Value.Length / 2, "numbered"));
                         i++;
                     }
                     else break;
@@ -2051,22 +2045,22 @@ public class WordDocumentService(SessionManager sessionManager)
             }
 
             // Ordered list item
-            var olMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\s*)\d+\.\s+(.+)$");
+            var olMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\s*)(\d+)\.\s+(.+)$");
             if (olMatch.Success)
             {
                 var indent = olMatch.Groups[1].Value.Length / 2;
-                var text = olMatch.Groups[2].Value;
+                var startAt = int.TryParse(olMatch.Groups[2].Value, out var parsedStartAt) ? Math.Max(1, parsedStartAt) : 1;
+                var text = olMatch.Groups[3].Value;
                 var listItems = new List<WordListItem> { new WordListItem(text, indent, "numbered") };
                 i++;
                 while (i < lines.Length)
                 {
-                    var nextOl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)\d+\.\s+(.+)$");
-                    var nextUl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)[-*+]\s+(.+)$");
-                    if (nextOl.Success) { listItems.Add(new WordListItem(nextOl.Groups[2].Value, nextOl.Groups[1].Value.Length / 2, "numbered")); i++; }
-                    else if (nextUl.Success) { listItems.Add(new WordListItem(nextUl.Groups[2].Value, nextUl.Groups[1].Value.Length / 2, "bulleted")); i++; }
+                    var nextOl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)(\d+)\.\s+(.+)$");
+                    if (nextOl.Success) { listItems.Add(new WordListItem(nextOl.Groups[3].Value, nextOl.Groups[1].Value.Length / 2, "numbered")); i++; }
                     else break;
                 }
-                var listDefs = EnsureStructuredListNumbering(document, listItems);
+                var orderedStartByLevel = new Dictionary<int, int> { [indent] = startAt };
+                var listDefs = EnsureStructuredListNumbering(document, listItems, orderedStartByLevel);
                 foreach (var item in listItems)
                 {
                     var kind = NormalizeListKind(item.Kind);
@@ -2913,7 +2907,10 @@ public class WordDocumentService(SessionManager sessionManager)
         }
     }
 
-    private static ListNumberingDefinitions EnsureStructuredListNumbering(WordprocessingDocument document, IReadOnlyCollection<WordListItem> items)
+    private static ListNumberingDefinitions EnsureStructuredListNumbering(
+        WordprocessingDocument document,
+        IReadOnlyCollection<WordListItem> items,
+        IReadOnlyDictionary<int, int>? orderedStartByLevel = null)
     {
         var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
         var numberingPart = mainPart.NumberingDefinitionsPart ?? mainPart.AddNewPart<NumberingDefinitionsPart>();
@@ -2926,7 +2923,7 @@ public class WordDocumentService(SessionManager sessionManager)
         var bulletedNumberingId = numberedNumberingId + 1;
 
         var maxLevel = items.Max(x => x.Level);
-        EnsureAbstractNumbering(numbering, numberedAbstractId, maxLevel, isNumbered: true, items);
+        EnsureAbstractNumbering(numbering, numberedAbstractId, maxLevel, isNumbered: true, items, orderedStartByLevel);
         EnsureAbstractNumbering(numbering, bulletedAbstractId, maxLevel, isNumbered: false, items);
 
         EnsureNumberingInstance(numbering, numberedNumberingId, numberedAbstractId);
@@ -2936,7 +2933,13 @@ public class WordDocumentService(SessionManager sessionManager)
         return new ListNumberingDefinitions(numberedNumberingId, bulletedNumberingId);
     }
 
-    private static void EnsureAbstractNumbering(W.Numbering numbering, int abstractId, int maxLevel, bool isNumbered, IReadOnlyCollection<WordListItem> items)
+    private static void EnsureAbstractNumbering(
+        W.Numbering numbering,
+        int abstractId,
+        int maxLevel,
+        bool isNumbered,
+        IReadOnlyCollection<WordListItem> items,
+        IReadOnlyDictionary<int, int>? orderedStartByLevel = null)
     {
         var existing = numbering.Elements<W.AbstractNum>().FirstOrDefault(a => a.AbstractNumberId?.Value == abstractId);
         existing?.Remove();
@@ -2947,7 +2950,7 @@ public class WordDocumentService(SessionManager sessionManager)
             var style = isNumbered
                 ? ResolveNumberStyle(items, level)
                 : ResolveBulletStyle(items, level);
-            abstractNum.Append(BuildListLevel(level, style, isNumbered));
+            abstractNum.Append(BuildListLevel(level, style, isNumbered, orderedStartByLevel));
         }
 
         numbering.Append(abstractNum);
@@ -2972,15 +2975,21 @@ public class WordDocumentService(SessionManager sessionManager)
         return Math.Max(1000, maxExisting + 1);
     }
 
-    private static W.Level BuildListLevel(int level, string style, bool isNumbered)
+    private static W.Level BuildListLevel(int level, string style, bool isNumbered, IReadOnlyDictionary<int, int>? orderedStartByLevel = null)
     {
         var left = 720 * (level + 1);
         var hanging = 360;
         var numberingFormat = isNumbered ? ResolveNumberFormat(style) : W.NumberFormatValues.Bullet;
         var levelText = isNumbered ? ResolveNumberLevelText(style, level) : ResolveBulletGlyph(style);
 
+        var startAt = 1;
+        if (isNumbered && orderedStartByLevel is not null && orderedStartByLevel.TryGetValue(level, out var configuredStartAt))
+        {
+            startAt = Math.Max(1, configuredStartAt);
+        }
+
         return new W.Level(
-            new W.StartNumberingValue { Val = 1 },
+            new W.StartNumberingValue { Val = startAt },
             new W.NumberingFormat { Val = numberingFormat },
             new W.LevelText { Val = levelText },
             new W.LevelJustification { Val = W.LevelJustificationValues.Left },

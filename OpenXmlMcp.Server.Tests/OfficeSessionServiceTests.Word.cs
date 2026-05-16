@@ -1178,6 +1178,115 @@ public partial class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordAppendMarkdown_SeparateOrderedSectionsDoNotContinueNumbering()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        var markdown = "## Trigger Model\n" +
+            "The workflow runs on three trigger types:\n" +
+            "1. **Manual trigger (`workflow_dispatch`)** for ad hoc or release candidate builds.\n" +
+            "2. **Pull request trigger (`pull_request`)** for change validation.\n" +
+            "3. **Scheduled trigger (`cron: 0 2 * * *`)** for daily freshness checks.\n" +
+            "This gives a balanced CI strategy.\n\n" +
+            "## High-Level Job Topology\n" +
+            "The pipeline has two jobs:\n" +
+            "1. **`build-qt` (Build Qt Cache)**\n" +
+            "   - Builds or restores toolchain prerequisites.\n" +
+            "2. **`build-android` (Build Android APK)**\n" +
+            "   - Depends on `build-qt`.";
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendMarkdown(sessionId, markdown);
+
+            var structureJson = service.ListStructure(sessionId);
+            using var doc = JsonDocument.Parse(structureJson);
+            var elements = doc.RootElement.GetProperty("elements").EnumerateArray().ToArray();
+
+            var triggerItems = elements
+                .Where(e => e.TryGetProperty("text", out var text)
+                    && (text.GetString()?.Contains("Manual trigger", StringComparison.OrdinalIgnoreCase) == true
+                        || text.GetString()?.Contains("Pull request trigger", StringComparison.OrdinalIgnoreCase) == true
+                        || text.GetString()?.Contains("Scheduled trigger", StringComparison.OrdinalIgnoreCase) == true))
+                .ToArray();
+
+            var jobItems = elements
+                .Where(e => e.TryGetProperty("text", out var text)
+                    && e.TryGetProperty("listLevel", out var level)
+                    && level.ValueKind == JsonValueKind.Number
+                    && level.GetInt32() == 0
+                    && (text.GetString()?.Contains("build-qt", StringComparison.OrdinalIgnoreCase) == true
+                        || text.GetString()?.Contains("build-android", StringComparison.OrdinalIgnoreCase) == true))
+                .ToArray();
+
+            Assert.True(triggerItems.Length >= 3);
+            Assert.True(jobItems.Length >= 2);
+            Assert.All(triggerItems, e => Assert.Equal("numbered", e.GetProperty("listKind").GetString()));
+            Assert.All(jobItems, e => Assert.Equal("numbered", e.GetProperty("listKind").GetString()));
+
+            var firstListId = triggerItems[0].GetProperty("numberingId").GetInt32();
+            var secondListId = jobItems[0].GetProperty("numberingId").GetInt32();
+            Assert.NotEqual(firstListId, secondListId);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAppendMarkdown_OrderedSectionCanIntentionallyContinueWithExplicitStart()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        var markdown = "1. First\n2. Second\n\nContext paragraph.\n\n4. Fourth\n5. Fifth";
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAppendMarkdown(sessionId, markdown);
+            service.CloseDocument(sessionId);
+
+            using var document = WordprocessingDocument.Open(filePath, false);
+            var bodyParagraphs = document.MainDocumentPart?.Document?.Body?
+                .Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                .ToList() ?? [];
+
+            var fourthParagraph = bodyParagraphs.First(p => p.InnerText.Contains("Fourth", StringComparison.OrdinalIgnoreCase));
+            var numId = fourthParagraph.ParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value;
+            Assert.NotNull(numId);
+
+            var numbering = document.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+            Assert.NotNull(numbering);
+
+            var instance = numbering!.Elements<DocumentFormat.OpenXml.Wordprocessing.NumberingInstance>()
+                .FirstOrDefault(n => n.NumberID?.Value == numId);
+            Assert.NotNull(instance);
+
+            var abstractId = instance!.AbstractNumId?.Val?.Value;
+            Assert.NotNull(abstractId);
+
+            var abstractNum = numbering.Elements<DocumentFormat.OpenXml.Wordprocessing.AbstractNum>()
+                .FirstOrDefault(a => a.AbstractNumberId?.Value == abstractId);
+            Assert.NotNull(abstractNum);
+
+            var level0 = abstractNum!.Elements<DocumentFormat.OpenXml.Wordprocessing.Level>()
+                .FirstOrDefault(l => l.LevelIndex?.Value == 0);
+            Assert.NotNull(level0);
+            Assert.Equal(4, level0!.StartNumberingValue?.Val?.Value);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void WordValidateDocument_DetectsSkippedHeadingLevel()
     {
         var service = OfficeSessionServiceTestHelpers.CreateService();
