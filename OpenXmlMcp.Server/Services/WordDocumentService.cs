@@ -1353,6 +1353,451 @@ public class WordDocumentService(SessionManager sessionManager)
         ];
     }
 
+    public string UpdateStyle(string sessionId, string styleName, string styleJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(styleJson);
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        sessionManager.ExecuteWriteOperation(session, "word_update_style", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            EnsureWordStyleInfrastructure(mainPart);
+            var stylePart = mainPart.StyleDefinitionsPart ?? throw new InvalidOperationException("Style definitions part is missing.");
+            var styles = stylePart.Styles ?? throw new InvalidOperationException("Styles are missing.");
+
+            // Resolve by styleId or name (includes built-ins)
+            var style = styles.Elements<W.Style>().FirstOrDefault(s =>
+                string.Equals(s.StyleId?.Value, styleName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(s.StyleName?.Val?.Value, styleName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Style '{styleName}' was not found. Ensure it is seeded (apply_style_preset or create_or_update_style first).");
+
+            var options = JsonNode.Parse(styleJson) as JsonObject
+                ?? throw new InvalidOperationException("Invalid styleJson object.");
+
+            // Infer type from existing style, not from options (update never changes type)
+            var styleType = style.Type?.Value ?? W.StyleValues.Paragraph;
+            ApplyStyleOptions(style, options, styleType);
+            stylePart.Styles.Save();
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_update_style", new { styleName });
+    }
+
+    public string AppendMarkdown(string sessionId, string markdown)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(markdown);
+        var session = sessionManager.GetWritableSession(sessionId, OfficeDocumentType.Word);
+        var addedCount = 0;
+
+        sessionManager.ExecuteWriteOperation(session, "word_append_markdown", () =>
+        {
+            using var document = WordprocessingDocument.Open(session.FilePath, true);
+            var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+            EnsureWordStyleInfrastructure(mainPart);
+            var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+
+            var elements = ParseMarkdownToElements(markdown, document);
+            foreach (var el in elements)
+            {
+                body.Append(el);
+                addedCount++;
+            }
+
+            mainPart.Document?.Save();
+        });
+
+        return SessionManager.BuildMutationResult("word_append_markdown", new { addedCount });
+    }
+
+    public string ValidateDocument(string sessionId)
+    {
+        var session = sessionManager.GetSession(sessionId);
+        if (session.DocumentType != OfficeDocumentType.Word)
+        {
+            throw new InvalidOperationException("Session document type is not Word.");
+        }
+
+        using var document = WordprocessingDocument.Open(session.FilePath, false);
+        var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("Main document part is missing.");
+        var body = mainPart.Document?.Body ?? throw new InvalidOperationException("Word document body is missing.");
+        var styles = mainPart.StyleDefinitionsPart?.Styles?.Elements<W.Style>().ToList() ?? [];
+
+        var issues = new List<object>();
+
+        // 1. Collect all headings and check for skipped levels
+        var bodyParagraphs = body.Elements<W.Paragraph>().ToList();
+        var headings = bodyParagraphs
+            .Select((p, i) => new { Paragraph = p, BodyIndex = i + 1, Level = GetHeadingLevel(p) })
+            .Where(x => x.Level.HasValue)
+            .ToList();
+
+        var previousLevel = 0;
+        foreach (var h in headings)
+        {
+            if (h.Level!.Value > previousLevel + 1)
+            {
+                issues.Add(new
+                {
+                    code = "SkippedHeadingLevel",
+                    severity = "warning",
+                    location = $"paragraph {h.BodyIndex}",
+                    message = $"Heading level {h.Level} follows level {previousLevel} — level {previousLevel + 1} was skipped.",
+                    suggestion = $"Add an intermediate Heading {previousLevel + 1} or promote this heading."
+                });
+            }
+            previousLevel = h.Level.Value;
+        }
+
+        // 2. List all headings for reference
+        var headingList = headings.Select(h => new { level = h.Level, text = TrimPreview(h.Paragraph.InnerText), bodyIndex = h.BodyIndex }).ToArray();
+
+        // 3. Empty table cells
+        var tables = body.Elements<W.Table>().ToList();
+        for (var ti = 0; ti < tables.Count; ti++)
+        {
+            var rows = tables[ti].Elements<W.TableRow>().ToList();
+            var colCounts = rows.Select(r => r.Elements<W.TableCell>().Count()).ToList();
+            var expectedCols = colCounts.Count > 0 ? colCounts[0] : 0;
+
+            for (var ri = 0; ri < rows.Count; ri++)
+            {
+                var cells = rows[ri].Elements<W.TableCell>().ToList();
+                // Inconsistent column count
+                if (cells.Count != expectedCols)
+                {
+                    issues.Add(new
+                    {
+                        code = "InconsistentColumnCount",
+                        severity = "warning",
+                        location = $"table {ti + 1}, row {ri + 1}",
+                        message = $"Row has {cells.Count} columns but table header row has {expectedCols}.",
+                        suggestion = "Ensure all rows have the same number of columns."
+                    });
+                }
+
+                for (var ci = 0; ci < cells.Count; ci++)
+                {
+                    if (string.IsNullOrWhiteSpace(cells[ci].InnerText))
+                    {
+                        issues.Add(new
+                        {
+                            code = "EmptyTableCell",
+                            severity = "info",
+                            location = $"table {ti + 1}, row {ri + 1}, column {ci + 1}",
+                            message = "Table cell is empty.",
+                            suggestion = "Fill in the cell or use a placeholder."
+                        });
+                    }
+                }
+            }
+        }
+
+        // 4. Direct formatting (paragraphs with explicit run font/size/color not from a style)
+        var directFormatCount = 0;
+        foreach (var para in bodyParagraphs)
+        {
+            foreach (var run in para.Elements<W.Run>())
+            {
+                var rPr = run.RunProperties;
+                if (rPr is null) continue;
+                if (rPr.RunStyle is not null) continue; // has a character style — fine
+                if (rPr.RunFonts is not null || rPr.FontSize is not null || rPr.Color is not null)
+                {
+                    directFormatCount++;
+                    break; // count once per paragraph
+                }
+            }
+        }
+
+        if (directFormatCount > 0)
+        {
+            issues.Add(new
+            {
+                code = "DirectFormatting",
+                severity = "info",
+                location = "document",
+                message = $"{directFormatCount} paragraph(s) contain runs with direct font/size/color formatting not from a character style.",
+                suggestion = "Use character styles for consistent formatting."
+            });
+        }
+
+        // 5. Unused custom styles
+        var usedStyleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var para in body.Descendants<W.Paragraph>())
+        {
+            var sid = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            if (!string.IsNullOrEmpty(sid)) usedStyleIds.Add(sid);
+            foreach (var run in para.Elements<W.Run>())
+            {
+                var rsid = run.RunProperties?.RunStyle?.Val?.Value;
+                if (!string.IsNullOrEmpty(rsid)) usedStyleIds.Add(rsid);
+            }
+        }
+
+        var builtInIds = new HashSet<string>(WordBuiltInStyles.Select(s => s.StyleId), StringComparer.OrdinalIgnoreCase);
+        var unusedCustomStyles = styles
+            .Where(s => s.CustomStyle?.Value == true
+                && !builtInIds.Contains(s.StyleId?.Value ?? string.Empty)
+                && !usedStyleIds.Contains(s.StyleId?.Value ?? string.Empty))
+            .Select(s => s.StyleId?.Value ?? string.Empty)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToArray();
+
+        if (unusedCustomStyles.Length > 0)
+        {
+            issues.Add(new
+            {
+                code = "UnusedCustomStyle",
+                severity = "info",
+                location = "document",
+                message = $"Custom style(s) defined but not used: {string.Join(", ", unusedCustomStyles)}.",
+                suggestion = "Remove unused styles or apply them to appropriate content."
+            });
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            issueCount = issues.Count,
+            headings = headingList,
+            issues
+        });
+    }
+
+    private static List<OpenXmlElement> ParseMarkdownToElements(string markdown, WordprocessingDocument document)
+    {
+        var elements = new List<OpenXmlElement>();
+        var lines = markdown.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+        var i = 0;
+
+        while (i < lines.Length)
+        {
+            var line = lines[i];
+
+            // Fenced code block
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                i++;
+                var codeLines = new List<string>();
+                while (i < lines.Length && !lines[i].TrimStart().StartsWith("```", StringComparison.Ordinal))
+                {
+                    codeLines.Add(lines[i]);
+                    i++;
+                }
+                i++; // skip closing ```
+                foreach (var codeLine in codeLines)
+                {
+                    var p = new W.Paragraph(new W.Run(new W.Text(codeLine) { Space = SpaceProcessingModeValues.Preserve }));
+                    elements.Add(p);
+                }
+                continue;
+            }
+
+            // Heading
+            var headingMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(#{1,9})\s+(.+)$");
+            if (headingMatch.Success)
+            {
+                var level = headingMatch.Groups[1].Value.Length;
+                var text = headingMatch.Groups[2].Value.Trim();
+                var para = new W.Paragraph(
+                    new W.ParagraphProperties(new W.ParagraphStyleId { Val = $"Heading{level}" }),
+                    new W.Run(new W.Text(text)));
+                elements.Add(para);
+                i++;
+                continue;
+            }
+
+            // Markdown table
+            if (line.TrimStart().StartsWith("|", StringComparison.Ordinal))
+            {
+                var tableLines = new List<string>();
+                while (i < lines.Length && lines[i].TrimStart().StartsWith("|", StringComparison.Ordinal))
+                {
+                    tableLines.Add(lines[i]);
+                    i++;
+                }
+                var table = BuildMarkdownTable(tableLines);
+                if (table is not null) elements.Add(table);
+                continue;
+            }
+
+            // Unordered list item
+            var ulMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\s*)[-*+]\s+(.+)$");
+            if (ulMatch.Success)
+            {
+                var indent = ulMatch.Groups[1].Value.Length / 2;
+                var text = ulMatch.Groups[2].Value;
+                var listItems = new List<WordListItem> { new WordListItem(text, indent, "bulleted") };
+                // collect continuation items
+                i++;
+                while (i < lines.Length)
+                {
+                    var nextUl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)[-*+]\s+(.+)$");
+                    var nextOl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)\d+\.\s+(.+)$");
+                    if (nextUl.Success)
+                    {
+                        listItems.Add(new WordListItem(nextUl.Groups[2].Value, nextUl.Groups[1].Value.Length / 2, "bulleted"));
+                        i++;
+                    }
+                    else if (nextOl.Success)
+                    {
+                        listItems.Add(new WordListItem(nextOl.Groups[2].Value, nextOl.Groups[1].Value.Length / 2, "numbered"));
+                        i++;
+                    }
+                    else break;
+                }
+                var listDefs = EnsureStructuredListNumbering(document, listItems);
+                foreach (var item in listItems)
+                {
+                    var kind = NormalizeListKind(item.Kind);
+                    var numId = kind == "numbered" ? listDefs.NumberedNumberingId : listDefs.BulletedNumberingId;
+                    var para = new W.Paragraph(
+                        new W.ParagraphProperties(
+                            new W.NumberingProperties(
+                                new W.NumberingLevelReference { Val = item.Level },
+                                new W.NumberingId { Val = numId })));
+                    AppendInlineMarkdown(para, item.Text);
+                    elements.Add(para);
+                }
+                continue;
+            }
+
+            // Ordered list item
+            var olMatch = System.Text.RegularExpressions.Regex.Match(line, @"^(\s*)\d+\.\s+(.+)$");
+            if (olMatch.Success)
+            {
+                var indent = olMatch.Groups[1].Value.Length / 2;
+                var text = olMatch.Groups[2].Value;
+                var listItems = new List<WordListItem> { new WordListItem(text, indent, "numbered") };
+                i++;
+                while (i < lines.Length)
+                {
+                    var nextOl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)\d+\.\s+(.+)$");
+                    var nextUl = System.Text.RegularExpressions.Regex.Match(lines[i], @"^(\s*)[-*+]\s+(.+)$");
+                    if (nextOl.Success) { listItems.Add(new WordListItem(nextOl.Groups[2].Value, nextOl.Groups[1].Value.Length / 2, "numbered")); i++; }
+                    else if (nextUl.Success) { listItems.Add(new WordListItem(nextUl.Groups[2].Value, nextUl.Groups[1].Value.Length / 2, "bulleted")); i++; }
+                    else break;
+                }
+                var listDefs = EnsureStructuredListNumbering(document, listItems);
+                foreach (var item in listItems)
+                {
+                    var kind = NormalizeListKind(item.Kind);
+                    var numId = kind == "numbered" ? listDefs.NumberedNumberingId : listDefs.BulletedNumberingId;
+                    var para = new W.Paragraph(
+                        new W.ParagraphProperties(
+                            new W.NumberingProperties(
+                                new W.NumberingLevelReference { Val = item.Level },
+                                new W.NumberingId { Val = numId })));
+                    AppendInlineMarkdown(para, item.Text);
+                    elements.Add(para);
+                }
+                continue;
+            }
+
+            // Blank line — skip
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                i++;
+                continue;
+            }
+
+            // Normal paragraph with inline markdown
+            {
+                var para = new W.Paragraph();
+                AppendInlineMarkdown(para, line);
+                elements.Add(para);
+                i++;
+            }
+        }
+
+        return elements;
+    }
+
+    private static W.Table? BuildMarkdownTable(List<string> tableLines)
+    {
+        // Parse cells, skip separator row (--|-- pattern)
+        var rows = tableLines
+            .Where(l => !System.Text.RegularExpressions.Regex.IsMatch(l, @"^\|[\s\-|:]+\|?\s*$"))
+            .Select(l => l.Trim().Trim('|').Split('|').Select(c => c.Trim()).ToArray())
+            .ToList();
+
+        if (rows.Count == 0) return null;
+
+        var table = new W.Table();
+        var colCount = rows[0].Length;
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = new W.TableRow();
+            for (var c = 0; c < colCount; c++)
+            {
+                var cellText = c < rows[r].Length ? rows[r][c] : string.Empty;
+                var cell = new W.TableCell();
+                var para = new W.Paragraph();
+                if (r == 0)
+                {
+                    // Header row — bold
+                    var run = new W.Run(new W.RunProperties(new W.Bold()), new W.Text(cellText) { Space = SpaceProcessingModeValues.Preserve });
+                    para.Append(run);
+                }
+                else
+                {
+                    AppendInlineMarkdown(para, cellText);
+                }
+                cell.Append(para);
+                row.Append(cell);
+            }
+            table.Append(row);
+        }
+
+        return table;
+    }
+
+    private static void AppendInlineMarkdown(W.Paragraph para, string text)
+    {
+        // Parse inline: **bold**, *italic*, `code`, and plain text
+        var pattern = @"(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)";
+        var lastIndex = 0;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, pattern))
+        {
+            if (m.Index > lastIndex)
+            {
+                para.Append(new W.Run(new W.Text(text[lastIndex..m.Index]) { Space = SpaceProcessingModeValues.Preserve }));
+            }
+
+            if (m.Value.StartsWith("**", StringComparison.Ordinal))
+            {
+                para.Append(new W.Run(new W.RunProperties(new W.Bold()), new W.Text(m.Groups[2].Value) { Space = SpaceProcessingModeValues.Preserve }));
+            }
+            else if (m.Value.StartsWith("*", StringComparison.Ordinal))
+            {
+                para.Append(new W.Run(new W.RunProperties(new W.Italic()), new W.Text(m.Groups[3].Value) { Space = SpaceProcessingModeValues.Preserve }));
+            }
+            else if (m.Value.StartsWith("`", StringComparison.Ordinal))
+            {
+                // Code span — use IntenseReference style if available
+                var run = new W.Run(
+                    new W.RunProperties(new W.RunStyle { Val = "IntenseReference" }),
+                    new W.Text(m.Groups[4].Value) { Space = SpaceProcessingModeValues.Preserve });
+                para.Append(run);
+            }
+
+            lastIndex = m.Index + m.Length;
+        }
+
+        if (lastIndex < text.Length)
+        {
+            para.Append(new W.Run(new W.Text(text[lastIndex..]) { Space = SpaceProcessingModeValues.Preserve }));
+        }
+
+        // If nothing was appended (empty text), add empty run
+        if (!para.Elements<W.Run>().Any())
+        {
+            para.Append(new W.Run(new W.Text(string.Empty)));
+        }
+    }
+
     public string ListParagraphRuns(string sessionId, int paragraphIndex)
     {
         var session = sessionManager.GetSession(sessionId);

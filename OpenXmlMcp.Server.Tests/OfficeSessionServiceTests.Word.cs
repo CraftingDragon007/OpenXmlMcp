@@ -766,6 +766,114 @@ public partial class OfficeSessionServiceTests
     }
 
     [Fact]
+    public void WordUpdateStyle_ModifiesBuiltInStyle()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var result = service.WordUpdateStyle(sessionId, "Heading 1",
+                "{\"fontSize\":20,\"colorHex\":\"1F4E79\"}");
+
+            Assert.Contains("\"ok\":true", result, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"styleName\":\"Heading 1\"", result, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordAppendMarkdown_ProducesHeadingsListsAndTable()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        var markdown = "## Runtime Flow\n\nThis is a **bold** intro with `code`.\n\n- Alpha\n- Beta\n- Gamma\n\n| Phase | Action |\n|---|---|\n| Start | Init |\n| Stop | Cleanup |";
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            var result = service.WordAppendMarkdown(sessionId, markdown);
+
+            Assert.Contains("\"ok\":true", result, StringComparison.OrdinalIgnoreCase);
+
+            var structure = service.ListStructure(sessionId);
+            Assert.Contains("heading", structure, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("tableCount", structure, StringComparison.OrdinalIgnoreCase);
+
+            var find = service.FindText(sessionId, "Runtime Flow");
+            Assert.Contains("\"matchCount\":1", find, StringComparison.OrdinalIgnoreCase);
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordValidateDocument_DetectsSkippedHeadingLevel()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddHeading(sessionId, 1, "Top");
+            service.WordAddHeading(sessionId, 3, "Skipped H2"); // skips level 2
+
+            var result = service.WordValidateDocument(sessionId);
+
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+
+            var issues = doc.RootElement.GetProperty("issues").EnumerateArray().ToArray();
+            Assert.Contains(issues, i => i.GetProperty("code").GetString() == "SkippedHeadingLevel");
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
+    public void WordValidateDocument_DetectsEmptyTableCell()
+    {
+        var service = OfficeSessionServiceTestHelpers.CreateService();
+        var filePath = OfficeSessionServiceTestHelpers.GetTempPath("docx");
+
+        try
+        {
+            var sessionId = service.CreateDocument(filePath, "docx");
+            service.WordAddTable(sessionId, 2, 2);
+            service.WordSetTableCell(sessionId, 1, 1, 1, "Filled");
+            // row1col2, row2col1, row2col2 remain empty
+
+            var result = service.WordValidateDocument(sessionId);
+
+            using var doc = JsonDocument.Parse(result);
+            var issues = doc.RootElement.GetProperty("issues").EnumerateArray().ToArray();
+            Assert.Contains(issues, i => i.GetProperty("code").GetString() == "EmptyTableCell");
+
+            service.CloseDocument(sessionId);
+        }
+        finally
+        {
+            OfficeSessionServiceTestHelpers.DeleteIfExists(filePath);
+        }
+    }
+
+    [Fact]
     public void WordInsertTableOfContents_InsertsFieldCode()
     {
         var service = OfficeSessionServiceTestHelpers.CreateService();

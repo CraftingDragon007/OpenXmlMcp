@@ -57,6 +57,7 @@ Each operation object can use `operation` (preferred) or `operationName` (legacy
 - Styles: `word_list_styles`, `word_apply_style_by_name`, `word_create_or_update_style`, `word_apply_character_style_to_text`, `word_apply_character_style_to_all`, `word_apply_character_style_by_pattern`
 - Semantic editing: `word_insert_after_heading`, `word_replace_section`
 - Document structure: `word_insert_table_of_contents`, `word_insert_page_break_after`, `word_set_header`, `word_set_footer`
+- Advanced authoring: `word_update_style`, `word_append_markdown`, `word_validate_document`
 
 ## Excel
 

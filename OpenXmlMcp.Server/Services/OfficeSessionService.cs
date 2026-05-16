@@ -372,6 +372,15 @@ public class OfficeSessionService(
     public string WordSetFooter(string sessionId, string text, int sectionIndex = 1)
         => wordService.SetFooter(sessionId, text, sectionIndex);
 
+    public string WordUpdateStyle(string sessionId, string styleName, string styleJson)
+        => wordService.UpdateStyle(sessionId, styleName, styleJson);
+
+    public string WordAppendMarkdown(string sessionId, string markdown)
+        => wordService.AppendMarkdown(sessionId, markdown);
+
+    public string WordValidateDocument(string sessionId)
+        => wordService.ValidateDocument(sessionId);
+
     public string WordApplyTableStyle(string sessionId, int tableIndex, string styleName)
         => wordService.ApplyTableStyle(sessionId, tableIndex, styleName);
 

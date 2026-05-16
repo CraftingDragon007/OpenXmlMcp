@@ -205,6 +205,33 @@ internal class OfficeTools(OfficeSessionService officeSessionService)
     }
 
     [McpServerTool]
+    [Description("Creates or updates a custom Word paragraph or character style from JSON options.")]
+    public string WordUpdateStyle(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Style id or style name (built-in or custom).")] string styleName,
+        [Description("JSON options for style properties.")] string styleJson)
+    {
+        return officeSessionService.WordUpdateStyle(sessionId, styleName, styleJson);
+    }
+
+    [McpServerTool]
+    [Description("Appends Markdown content to a DOCX session. Supports headings, paragraphs, lists, tables, bold, italic, and inline code.")]
+    public string WordAppendMarkdown(
+        [Description("Active DOCX session id.")] string sessionId,
+        [Description("Markdown string to append.")] string markdown)
+    {
+        return officeSessionService.WordAppendMarkdown(sessionId, markdown);
+    }
+
+    [McpServerTool]
+    [Description("Validates the Word document structure and returns issues: skipped heading levels, empty cells, inconsistent column counts, direct formatting, unused styles.")]
+    public string WordValidateDocument(
+        [Description("Active DOCX session id.")] string sessionId)
+    {
+        return officeSessionService.WordValidateDocument(sessionId);
+    }
+
+    [McpServerTool]
     [Description("Inserts a Word TOC field at a 1-based paragraph index. Word updates the TOC on open.")]
     public string WordInsertTableOfContents(
         [Description("Active DOCX session id.")] string sessionId,

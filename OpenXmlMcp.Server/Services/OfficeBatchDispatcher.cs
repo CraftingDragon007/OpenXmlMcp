@@ -139,6 +139,17 @@ internal static class OfficeBatchDispatcher
                     payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
                     payload["matchCase"]?.GetValue<bool>() ?? true,
                     payload["maxMatches"]?.GetValue<int>() ?? 5000),
+            ["word_update_style"] = static (svc, sessionId, payload) =>
+                _ = svc.WordUpdateStyle(
+                    sessionId,
+                    payload["styleName"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleName'."),
+                    payload["styleJson"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'styleJson'.")),
+            ["word_append_markdown"] = static (svc, sessionId, payload) =>
+                _ = svc.WordAppendMarkdown(
+                    sessionId,
+                    payload["markdown"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'markdown'.")),
+            ["word_validate_document"] = static (svc, sessionId, _) =>
+                _ = svc.WordValidateDocument(sessionId),
             ["word_insert_table_of_contents"] = static (svc, sessionId, payload) =>
                 _ = svc.WordInsertTableOfContents(
                     sessionId,
